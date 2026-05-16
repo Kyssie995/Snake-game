@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Snake v4.1</title>
+<title>Snake v4</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -402,110 +402,22 @@ canvas{display:block;image-rendering:pixelated;}
 // ══════════════════════════════════════════════════════
 //  VERSION LOCK
 // ══════════════════════════════════════════════════════
-const GAME_VERSION='4.1';
+const GAME_VERSION='4';
 (function(){
   const saved=localStorage.getItem('snake_version');
   if(saved!==GAME_VERSION){
-    // Rescue as much data as possible from old versions
-    let oldProfile=null, oldCoins=0, oldHs=0, oldOwned=null, oldEquipped=null, oldDevice=null;
-    try{ oldProfile=JSON.parse(localStorage.getItem('snake_profile')); }catch(e){}
-    try{ oldCoins=JSON.parse(localStorage.getItem('snake_coins'))||0; }catch(e){}
-    try{ oldHs=JSON.parse(localStorage.getItem('snake_hs'))||0; }catch(e){}
-    try{ oldOwned=JSON.parse(localStorage.getItem('snake_owned')); }catch(e){}
-    try{ oldEquipped=localStorage.getItem('snake_equipped'); }catch(e){}
-    try{ oldDevice=localStorage.getItem('snake_device'); }catch(e){}
-
+    const name=localStorage.getItem('snake_profile_name');
+    const dev=localStorage.getItem('snake_device');
     localStorage.clear();
+    if(name)localStorage.setItem('snake_profile_name',name);
+    if(dev)localStorage.setItem('snake_device',dev);
     localStorage.setItem('snake_version',GAME_VERSION);
-
-    // Restore rescued data
-    if(oldProfile) localStorage.setItem('snake_profile',JSON.stringify(oldProfile));
-    if(oldCoins)   localStorage.setItem('snake_coins',JSON.stringify(oldCoins));
-    if(oldHs)      localStorage.setItem('snake_hs',JSON.stringify(oldHs));
-    if(oldOwned)   localStorage.setItem('snake_owned',JSON.stringify(oldOwned));
-    if(oldEquipped)localStorage.setItem('snake_equipped',oldEquipped);
-    if(oldDevice)  localStorage.setItem('snake_device',oldDevice);
   }
 })();
 
 // ══════════════════════════════════════════════════════
-//  SUPABASE LIVE CONFIG
+//  PERSISTENCE
 // ══════════════════════════════════════════════════════
-const SB_URL  = 'https://fvzuwkeiefddwphudogl.supabase.co';
-const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2enV3a2VpZWZkZHdwaHVkb2dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5MjEwNjQsImV4cCI6MjA5NDQ5NzA2NH0.PT3K45FghL4-4W1bMjynCcbO3DxqnIF2iG35d-Vttfg';
-
-// Live config values — defaults used until Supabase responds
-let REMOTE = {
-  version:          '4.1',
-  speed_base:       180,
-  coin_chance:      0.25,
-  message:          '',
-  skin_fire_price:  15,
-  skin_ocean_price: 20,
-  skin_forest_price:20,
-  skin_gold_price:  50,
-  skin_neon_price:  35,
-  skin_ice_price:   30,
-  skin_toxic_price: 40,
-};
-
-async function fetchRemoteConfig(){
-  try{
-    const res = await fetch(`${SB_URL}/rest/v1/game_config?select=key,value`,{
-      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
-    });
-    if(!res.ok) return;
-    const rows = await res.json();
-    rows.forEach(r=>{
-      const v = r.value;
-      switch(r.key){
-        case 'version':           REMOTE.version=v; break;
-        case 'speed_base':        REMOTE.speed_base=parseInt(v)||180; break;
-        case 'coin_chance':       REMOTE.coin_chance=parseFloat(v)||0.25; break;
-        case 'message':           REMOTE.message=v; break;
-        case 'skin_fire_price':   REMOTE.skin_fire_price=parseInt(v)||15; break;
-        case 'skin_ocean_price':  REMOTE.skin_ocean_price=parseInt(v)||20; break;
-        case 'skin_forest_price': REMOTE.skin_forest_price=parseInt(v)||20; break;
-        case 'skin_gold_price':   REMOTE.skin_gold_price=parseInt(v)||50; break;
-        case 'skin_neon_price':   REMOTE.skin_neon_price=parseInt(v)||35; break;
-        case 'skin_ice_price':    REMOTE.skin_ice_price=parseInt(v)||30; break;
-        case 'skin_toxic_price':  REMOTE.skin_toxic_price=parseInt(v)||40; break;
-      }
-    });
-    // Apply skin prices from remote
-    SKINS.forEach(s=>{
-      const k = 'skin_'+s.id+'_price';
-      if(REMOTE[k]!==undefined) s.price=REMOTE[k];
-    });
-    // Show server message if set
-    if(REMOTE.message && REMOTE.message.trim()){
-      showServerMessage(REMOTE.message);
-    }
-    // Force reload if server version is newer
-    if(REMOTE.version !== GAME_VERSION){
-      showServerMessage('UPDATE VERFUGBAR! Seite wird neu geladen...');
-      setTimeout(()=>location.reload(true), 3000);
-    }
-  } catch(e){ console.warn('Config fetch failed:',e); }
-}
-
-function showServerMessage(msg){
-  let el = document.getElementById('server-msg');
-  if(!el){
-    el = document.createElement('div');
-    el.id = 'server-msg';
-    el.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#7f77dd;color:#fff;font-family:\'Press Start 2P\',monospace;font-size:7px;padding:8px;text-align:center;z-index:9999;cursor:pointer;letter-spacing:.05em;';
-    el.onclick=()=>el.remove();
-    document.body.appendChild(el);
-  }
-  el.textContent = msg+' (tippen zum schliessen)';
-}
-
-// Fetch on load + every 30 seconds
-fetchRemoteConfig();
-setInterval(fetchRemoteConfig, 30000);
-
-
 function load(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v);}catch{return d;}}
 function save(k,v){localStorage.setItem(k,JSON.stringify(v));}
 
@@ -579,30 +491,22 @@ function fmtDate(ts){
 //  SKINS
 // ══════════════════════════════════════════════════════
 const SKINS=[
-  // Classic — cool purple, unchanged
   {id:'classic',name:'CLASSIC',price:0,free:true,
    head:'#afa9ec',body:t=>`rgb(${80+t*47|0},${74+t*45|0},${183-t*40|0})`,glow:'#7f77dd',eye:'#0a0a0f'},
-  // Lodernde Flammen — deep crimson to charcoal ember, blood-orange glow
-  {id:'fire',name:'LODERNDE FLAMMEN',price:15,
-   head:'#ff2200',body:t=>`rgb(${200-t*80|0},${30+t*10|0},${t*5|0})`,glow:'#cc1100',eye:'#ff9900'},
-  // Ocean — deep navy to teal, bioluminescent glow
-  {id:'ocean',name:'OZEAN',price:20,
-   head:'#00cfff',body:t=>`rgb(0,${120+t*60|0},${180-t*70|0})`,glow:'#0077aa',eye:'#ffffff'},
-  // Natures Wrath — dark moss to bark brown, venomous yellow eye
-  {id:'forest',name:'NATURES WRATH',price:20,
-   head:'#2d5a1b',body:t=>`rgb(${25+t*40|0},${60-t*20|0},${10+t*8|0})`,glow:'#1a3a0a',eye:'#c8ff00'},
-  // Gold — burnished gold to dark bronze
-  {id:'gold',name:'GOLD',price:50,
-   head:'#ffd700',body:t=>`rgb(${220-t*60|0},${160-t*80|0},${t*5|0})`,glow:'#cc9900',eye:'#2a0a00'},
-  // Neon — electric magenta to violet
-  {id:'neon',name:'NEON',price:35,
-   head:'#ff00ff',body:t=>t<.5?`rgb(255,0,${255-t*400|0})`:`rgb(${(t-.5)*400|0},0,255)`,glow:'#dd00ff',eye:'#00ffff'},
-  // Frostbite — white-blue to deep arctic blue, icy cyan glow
-  {id:'ice',name:'FROSTBITE',price:30,
-   head:'#c8f0ff',body:t=>`rgb(${160-t*100|0},${210-t*110|0},${255-t*40|0})`,glow:'#44aadd',eye:'#001a33'},
-  // Toxic Waste — sickly yellow-green to murky sludge brown
-  {id:'toxic',name:'TOXIC WASTE',price:40,
-   head:'#b8ff00',body:t=>`rgb(${80+t*60|0},${180-t*120|0},${t*20|0})`,glow:'#6ebb00',eye:'#cc0000'},
+  {id:'fire',name:'FEUER 🔥',price:15,
+   head:'#ff6a00',body:t=>`rgb(${220-t*60|0},${80+t*20|0},0)`,glow:'#ff4400',eye:'#ffff00'},
+  {id:'ocean',name:'OZEAN 🌊',price:20,
+   head:'#00d4ff',body:t=>`rgb(0,${160+t*40|0},${200-t*60|0})`,glow:'#0099cc',eye:'#ffffff'},
+  {id:'forest',name:'WALD 🌿',price:20,
+   head:'#4caf50',body:t=>`rgb(${40+t*30|0},${130-t*40|0},${50+t*10|0})`,glow:'#2e7d32',eye:'#ffeb3b'},
+  {id:'gold',name:'GOLD 👑',price:50,
+   head:'#ffd700',body:t=>`rgb(${220-t*40|0},${180-t*60|0},0)`,glow:'#ffaa00',eye:'#3a1a00'},
+  {id:'neon',name:'NEON ⚡',price:35,
+   head:'#ff00ff',body:t=>t<.5?`rgb(255,0,${255-t*400|0})` : `rgb(${(t-.5)*400|0},0,255)`,glow:'#ff00ff',eye:'#00ffff'},
+  {id:'ice',name:'EIS ❄️',price:30,
+   head:'#e0f7ff',body:t=>`rgb(${180-t*60|0},${230-t*60|0},255)`,glow:'#80d8ff',eye:'#003366'},
+  {id:'toxic',name:'TOXIC ☢️',price:40,
+   head:'#aaff00',body:t=>`rgb(${100+t*50|0},${220-t*80|0},0)`,glow:'#88ff00',eye:'#ff0000'},
 ];
 
 let coins=load('snake_coins',0);
@@ -625,7 +529,7 @@ let score,level,state;
 let bonusTimer,coinTimer,sessionCoins;
 let stepMs,lastStepTime=0,rafId=null,interpT=0,prevSnake=[];
 
-function stepInterval(){return Math.max(60,(REMOTE.speed_base||180)-(level-1)*15);}
+function stepInterval(){return Math.max(80,180-(level-1)*15);}
 
 function init(){
   const mid=Math.floor(COLS/2);
@@ -685,7 +589,7 @@ function gridStep(){
     score+=10*level;ate=true;
     food=rndPos();
     if(score>=level*60){level=Math.min(10,level+1);stepMs=stepInterval();}
-    if(Math.random()<(REMOTE.coin_chance||0.25)&&!coinItem){coinItem=rndPos();coinTimer=80;}
+    if(Math.random()<.25&&!coinItem){coinItem=rndPos();coinTimer=80;}
     if(Math.random()<.2&&!bonus){bonus=rndPos();bonusTimer=70;}
   } else if(coinItem&&h.x===coinItem.x&&h.y===coinItem.y){
     coins++;sessionCoins++;profile.coinsEarned++;saveProfile();
