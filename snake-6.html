@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Snake v4.3</title>
+<title>Snake v4</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -61,32 +61,17 @@ body::before{
 .dev-btn .sub{font-size:6px;color:var(--muted);line-height:1.8;text-align:center;}
 
 /* ══ SETUP SCREEN ══ */
-#setup-screen{justify-content:center;gap:.7rem;padding:2rem;max-width:400px;margin:0 auto;}
-#setup-screen h1,#login-screen h1{font-size:clamp(16px,4vw,26px);letter-spacing:.15em;color:var(--accent2);
+#setup-screen{justify-content:center;gap:1rem;padding:2rem;max-width:400px;margin:0 auto;}
+#setup-screen h1{font-size:clamp(16px,4vw,26px);letter-spacing:.15em;color:var(--accent2);
   text-shadow:0 0 20px rgba(127,119,221,.6);animation:flicker 4s infinite;}
-#setup-screen h2,#login-screen h2{font-size:9px;color:var(--accent2);letter-spacing:.1em;}
-#setup-screen p,#login-screen p{font-size:7px;color:var(--muted);line-height:1.8;text-align:center;}
-
-/* ══ LOGIN SCREEN ══ */
-#login-screen{justify-content:center;gap:.7rem;padding:2rem;max-width:400px;margin:0 auto;}
-/* ══ SETUP / LOGIN INPUTS ══ */
-#prof-name-input, #prof-pw-input, #login-pw-input{
+#setup-screen h2{font-size:9px;color:var(--accent2);letter-spacing:.1em;}
+#setup-screen p{font-size:7px;color:var(--muted);line-height:1.8;text-align:center;}
+#prof-name-input{
   background:rgba(127,119,221,.08);border:1px solid var(--border);color:var(--text);
   font-family:'Press Start 2P',monospace;font-size:9px;padding:10px;width:100%;
   outline:none;letter-spacing:.05em;
 }
-#prof-name-input:focus,#prof-pw-input:focus,#login-pw-input:focus{border-color:var(--accent);}
-.input-label{font-size:6px;color:var(--muted);letter-spacing:.05em;align-self:flex-start;}
-.input-err{font-size:6px;color:var(--red);display:none;text-align:center;}
-
-/* ══ SOUND TOGGLE ══ */
-#sound-toggle{
-  position:fixed;top:8px;right:8px;z-index:999;
-  background:rgba(15,15,26,.9);border:1px solid var(--border);
-  color:var(--muted);font-family:'Press Start 2P',monospace;font-size:6px;
-  padding:5px 8px;cursor:pointer;transition:color .15s,border-color .15s;
-}
-#sound-toggle:hover{color:var(--accent2);border-color:var(--accent);}
+#prof-name-input:focus{border-color:var(--accent);}
 
 @keyframes flicker{0%,92%,94%,96%,100%{opacity:1}93%,95%{opacity:.85}}
 
@@ -238,16 +223,6 @@ canvas{display:block;image-rendering:pixelated;}
 .panel.visible{display:flex;}
 
 /* ══ SHOP ══ */
-.shop-tabs{display:flex;gap:3px;width:100%;margin-bottom:6px;}
-.shop-tab-btn{
-  flex:1;background:transparent;border:1px solid var(--border);
-  color:var(--muted);font-family:'Press Start 2P',monospace;font-size:5px;
-  padding:6px 2px;cursor:pointer;letter-spacing:.03em;transition:all .15s;
-}
-.shop-tab-btn.active{border-color:var(--coin);color:var(--coin);background:rgba(245,197,24,.08);}
-.shop-section{display:none;flex-direction:column;gap:6px;}
-.shop-section.visible{display:flex;}
-
 #shop-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;}
 .skin-card{
   border:1px solid var(--border);background:rgba(15,15,26,.8);
@@ -262,56 +237,6 @@ canvas{display:block;image-rendering:pixelated;}
 .skin-badge.buy-b{color:var(--coin);border-color:var(--coin);cursor:pointer;}
 .skin-badge.buy-b:hover{background:rgba(245,197,24,.15);}
 .skin-badge.cant-b{color:var(--muted);border-color:var(--muted);}
-
-/* ── MAPS coming soon ── */
-.map-card{
-  border:1px solid var(--border);background:rgba(15,15,26,.8);
-  padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:8px;
-  opacity:.6;
-}
-.map-preview{
-  width:100%;height:50px;background:repeating-linear-gradient(45deg,#0f0f1a,#0f0f1a 4px,#1a1a2e 4px,#1a1a2e 8px);
-  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
-  font-size:6px;color:var(--muted);letter-spacing:.06em;
-}
-.map-name{font-size:5px;color:var(--muted);letter-spacing:.06em;}
-.coming-soon-badge{font-size:5px;padding:3px 7px;border:1px solid var(--muted);color:var(--muted);letter-spacing:.06em;}
-
-/* ── CODE EINLÖSEN ── */
-.code-box{
-  border:1px solid var(--border);background:rgba(15,15,26,.8);
-  padding:12px;display:flex;flex-direction:column;gap:10px;
-}
-.code-box label{font-size:6px;color:var(--muted);letter-spacing:.05em;}
-.code-input-row{display:flex;gap:6px;}
-#code-input{
-  flex:1;background:rgba(127,119,221,.08);border:1px solid var(--border);
-  color:var(--text);font-family:'Press Start 2P',monospace;font-size:7px;
-  padding:8px;outline:none;letter-spacing:.06em;text-transform:uppercase;
-}
-#code-input:focus{border-color:var(--accent);}
-#code-submit{
-  background:transparent;border:1px solid var(--accent);color:var(--accent2);
-  font-family:'Press Start 2P',monospace;font-size:6px;padding:6px 10px;
-  cursor:pointer;letter-spacing:.04em;white-space:nowrap;transition:background .15s;
-}
-#code-submit:hover{background:rgba(127,119,221,.15);}
-#code-msg{font-size:6px;min-height:10px;text-align:center;letter-spacing:.04em;}
-#code-msg.ok{color:var(--green);}
-#code-msg.err{color:var(--red);}
-
-/* ── BOOST TIMER ── */
-#boost-bar{
-  display:none;position:fixed;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,var(--coin),#ff9900);z-index:998;
-  transform-origin:left;transition:transform .5s linear;
-}
-#boost-label{
-  display:none;position:fixed;top:4px;left:50%;transform:translateX(-50%);
-  font-family:'Press Start 2P',monospace;font-size:5px;color:var(--coin);
-  text-shadow:0 0 8px rgba(245,197,24,.8);z-index:998;letter-spacing:.05em;
-  pointer-events:none;
-}
 
 /* ══ PROFILE ══ */
 .prof-card{
@@ -379,42 +304,15 @@ canvas{display:block;image-rendering:pixelated;}
   </div>
 </div>
 
-<!-- SOUND TOGGLE (always visible) -->
-<button id="sound-toggle">🔊 TON</button>
-
-<!-- BOOST INDICATORS -->
-<div id="boost-bar"></div>
-<div id="boost-label"></div>
-
 <!-- ═══════════════════════════════════════
      2. SETUP SCREEN (first launch)
 ═══════════════════════════════════════ -->
 <div id="setup-screen" class="screen">
   <h1>SNAKE</h1>
   <h2>PROFIL ERSTELLEN</h2>
-  <p>Erstelle dein Profil.<br>Passwort schützt deinen Account.</p>
-  <span class="input-label">SPIELERNAME</span>
+  <p>Gib deinen Spielernamen ein.<br>Dein Profil wird lokal gespeichert.</p>
   <input id="prof-name-input" maxlength="12" placeholder="DEIN NAME" autocomplete="off" spellcheck="false">
-  <span class="input-label">PASSWORT</span>
-  <input id="prof-pw-input" type="password" maxlength="20" placeholder="DEIN PASSWORT" autocomplete="new-password">
-  <span class="input-label">PASSWORT WIEDERHOLEN</span>
-  <input id="prof-pw2-input" type="password" maxlength="20" placeholder="WIEDERHOLEN" autocomplete="new-password">
-  <div class="input-err" id="setup-err">Passwörter stimmen nicht überein</div>
-  <button class="btn" id="setup-confirm">▶ PROFIL ERSTELLEN</button>
-</div>
-
-<!-- ═══════════════════════════════════════
-     2b. LOGIN SCREEN (returning player)
-═══════════════════════════════════════ -->
-<div id="login-screen" class="screen">
-  <h1>SNAKE</h1>
-  <h2>WILLKOMMEN ZURÜCK</h2>
-  <p id="login-playername" style="font-size:8px;color:var(--accent2);letter-spacing:.08em"></p>
-  <span class="input-label">PASSWORT</span>
-  <input id="login-pw-input" type="password" maxlength="20" placeholder="DEIN PASSWORT" autocomplete="current-password">
-  <div class="input-err" id="login-err">Falsches Passwort</div>
-  <button class="btn" id="login-confirm">▶ ANMELDEN</button>
-  <button class="btn danger sm" id="login-reset" style="font-size:5px;padding:5px 8px;margin-top:4px">Profil zurücksetzen</button>
+  <button class="btn" id="setup-confirm">▶ LOS GEHT'S</button>
 </div>
 
 <!-- ═══════════════════════════════════════
@@ -487,62 +385,7 @@ canvas{display:block;image-rendering:pixelated;}
 
     <div id="shop-panel" class="panel">
       <h2>🛒 SHOP</h2>
-
-      <!-- Shop Sub-Tabs -->
-      <div class="shop-tabs">
-        <button class="shop-tab-btn active" onclick="showShopTab('skins')">SKINS</button>
-        <button class="shop-tab-btn" onclick="showShopTab('maps')">MAPS</button>
-        <button class="shop-tab-btn" onclick="showShopTab('codes')">CODES</button>
-      </div>
-
-      <!-- SKINS SECTION -->
-      <div id="shop-skins" class="shop-section visible">
-        <div id="shop-grid"></div>
-      </div>
-
-      <!-- MAPS SECTION -->
-      <div id="shop-maps" class="shop-section">
-        <div id="maps-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">
-          <div class="map-card">
-            <div class="map-preview">???</div>
-            <div class="map-name">DARK ZONE</div>
-            <div class="coming-soon-badge">COMING SOON</div>
-          </div>
-          <div class="map-card">
-            <div class="map-preview">???</div>
-            <div class="map-name">ICE WORLD</div>
-            <div class="coming-soon-badge">COMING SOON</div>
-          </div>
-          <div class="map-card">
-            <div class="map-preview">???</div>
-            <div class="map-name">TOXIC ZONE</div>
-            <div class="coming-soon-badge">COMING SOON</div>
-          </div>
-          <div class="map-card">
-            <div class="map-preview">???</div>
-            <div class="map-name">LAVA RUN</div>
-            <div class="coming-soon-badge">COMING SOON</div>
-          </div>
-        </div>
-        <p style="font-size:5px;color:var(--muted);text-align:center;line-height:1.8">Maps kommen in einem<br>zukunftigen Update!</p>
-      </div>
-
-      <!-- CODES SECTION -->
-      <div id="shop-codes" class="shop-section">
-        <div class="code-box">
-          <label>CODE EINLOSEN</label>
-          <div class="code-input-row">
-            <input id="code-input" maxlength="24" placeholder="CODE EINGEBEN..." autocomplete="off" spellcheck="false">
-            <button id="code-submit">OK</button>
-          </div>
-          <div id="code-msg"></div>
-        </div>
-        <div id="active-boosts-box" style="display:none;border:1px solid var(--coin);background:rgba(245,197,24,.06);padding:10px;display:flex;flex-direction:column;gap:6px;">
-          <div style="font-size:6px;color:var(--coin);letter-spacing:.06em">AKTIVE BOOSTS</div>
-          <div id="active-boosts-list" style="font-size:6px;color:var(--text);line-height:1.8"></div>
-        </div>
-        <p style="font-size:5px;color:var(--muted);text-align:center;line-height:1.8">Codes gibt es bei<br>Events und Updates!</p>
-      </div>
+      <div id="shop-grid"></div>
     </div>
 
     <div id="profile-panel" class="panel">
@@ -559,110 +402,22 @@ canvas{display:block;image-rendering:pixelated;}
 // ══════════════════════════════════════════════════════
 //  VERSION LOCK
 // ══════════════════════════════════════════════════════
-const GAME_VERSION='4.3';
+const GAME_VERSION='4';
 (function(){
   const saved=localStorage.getItem('snake_version');
   if(saved!==GAME_VERSION){
-    // Rescue as much data as possible from old versions
-    let oldProfile=null, oldCoins=0, oldHs=0, oldOwned=null, oldEquipped=null, oldDevice=null;
-    try{ oldProfile=JSON.parse(localStorage.getItem('snake_profile')); }catch(e){}
-    try{ oldCoins=JSON.parse(localStorage.getItem('snake_coins'))||0; }catch(e){}
-    try{ oldHs=JSON.parse(localStorage.getItem('snake_hs'))||0; }catch(e){}
-    try{ oldOwned=JSON.parse(localStorage.getItem('snake_owned')); }catch(e){}
-    try{ oldEquipped=localStorage.getItem('snake_equipped'); }catch(e){}
-    try{ oldDevice=localStorage.getItem('snake_device'); }catch(e){}
-
+    const name=localStorage.getItem('snake_profile_name');
+    const dev=localStorage.getItem('snake_device');
     localStorage.clear();
+    if(name)localStorage.setItem('snake_profile_name',name);
+    if(dev)localStorage.setItem('snake_device',dev);
     localStorage.setItem('snake_version',GAME_VERSION);
-
-    // Restore rescued data
-    if(oldProfile) localStorage.setItem('snake_profile',JSON.stringify(oldProfile));
-    if(oldCoins)   localStorage.setItem('snake_coins',JSON.stringify(oldCoins));
-    if(oldHs)      localStorage.setItem('snake_hs',JSON.stringify(oldHs));
-    if(oldOwned)   localStorage.setItem('snake_owned',JSON.stringify(oldOwned));
-    if(oldEquipped)localStorage.setItem('snake_equipped',oldEquipped);
-    if(oldDevice)  localStorage.setItem('snake_device',oldDevice);
   }
 })();
 
 // ══════════════════════════════════════════════════════
-//  SUPABASE LIVE CONFIG
+//  PERSISTENCE
 // ══════════════════════════════════════════════════════
-const SB_URL  = 'https://fvzuwkeiefddwphudogl.supabase.co';
-const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2enV3a2VpZWZkZHdwaHVkb2dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5MjEwNjQsImV4cCI6MjA5NDQ5NzA2NH0.PT3K45FghL4-4W1bMjynCcbO3DxqnIF2iG35d-Vttfg';
-
-// Live config values — defaults used until Supabase responds
-let REMOTE = {
-  version:          '4.1',
-  speed_base:       180,
-  coin_chance:      0.25,
-  message:          '',
-  skin_fire_price:  15,
-  skin_ocean_price: 20,
-  skin_forest_price:20,
-  skin_gold_price:  50,
-  skin_neon_price:  35,
-  skin_ice_price:   30,
-  skin_toxic_price: 40,
-};
-
-async function fetchRemoteConfig(){
-  try{
-    const res = await fetch(`${SB_URL}/rest/v1/game_config?select=key,value`,{
-      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
-    });
-    if(!res.ok) return;
-    const rows = await res.json();
-    rows.forEach(r=>{
-      const v = r.value;
-      switch(r.key){
-        case 'version':           REMOTE.version=v; break;
-        case 'speed_base':        REMOTE.speed_base=parseInt(v)||180; break;
-        case 'coin_chance':       REMOTE.coin_chance=parseFloat(v)||0.25; break;
-        case 'message':           REMOTE.message=v; break;
-        case 'skin_fire_price':   REMOTE.skin_fire_price=parseInt(v)||15; break;
-        case 'skin_ocean_price':  REMOTE.skin_ocean_price=parseInt(v)||20; break;
-        case 'skin_forest_price': REMOTE.skin_forest_price=parseInt(v)||20; break;
-        case 'skin_gold_price':   REMOTE.skin_gold_price=parseInt(v)||50; break;
-        case 'skin_neon_price':   REMOTE.skin_neon_price=parseInt(v)||35; break;
-        case 'skin_ice_price':    REMOTE.skin_ice_price=parseInt(v)||30; break;
-        case 'skin_toxic_price':  REMOTE.skin_toxic_price=parseInt(v)||40; break;
-      }
-    });
-    // Apply skin prices from remote
-    SKINS.forEach(s=>{
-      const k = 'skin_'+s.id+'_price';
-      if(REMOTE[k]!==undefined) s.price=REMOTE[k];
-    });
-    // Show server message if set
-    if(REMOTE.message && REMOTE.message.trim()){
-      showServerMessage(REMOTE.message);
-    }
-    // Force reload if server sends a forced-reload signal (ends with _reload)
-    if(REMOTE.version && REMOTE.version.endsWith('_reload')){
-      showServerMessage('Update wird geladen...');
-      setTimeout(()=>location.reload(true), 3000);
-    }
-  } catch(e){ console.warn('Config fetch failed:',e); }
-}
-
-function showServerMessage(msg){
-  let el = document.getElementById('server-msg');
-  if(!el){
-    el = document.createElement('div');
-    el.id = 'server-msg';
-    el.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#7f77dd;color:#fff;font-family:\'Press Start 2P\',monospace;font-size:7px;padding:8px;text-align:center;z-index:9999;cursor:pointer;letter-spacing:.05em;';
-    el.onclick=()=>el.remove();
-    document.body.appendChild(el);
-  }
-  el.textContent = msg+' (tippen zum schliessen)';
-}
-
-// Fetch on load + every 30 seconds
-fetchRemoteConfig();
-setInterval(fetchRemoteConfig, 30000);
-
-
 function load(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v);}catch{return d;}}
 function save(k,v){localStorage.setItem(k,JSON.stringify(v));}
 
@@ -696,65 +451,13 @@ function applyDevice(mode){
 }
 
 // ══════════════════════════════════════════════════════
-//  SOUND ENGINE (Web Audio API — no files needed)
-// ══════════════════════════════════════════════════════
-let soundOn = load('snake_sound', true);
-let audioCtx = null;
-
-function getAudioCtx(){
-  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-  return audioCtx;
-}
-
-function playTone(freq, type, duration, vol=0.18, fadeOut=true){
-  if(!soundOn) return;
-  try{
-    const ctx=getAudioCtx();
-    const osc=ctx.createOscillator();
-    const gain=ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type=type; osc.frequency.setValueAtTime(freq,ctx.currentTime);
-    gain.gain.setValueAtTime(vol,ctx.currentTime);
-    if(fadeOut) gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+duration);
-    osc.start(ctx.currentTime); osc.stop(ctx.currentTime+duration);
-  }catch(e){}
-}
-
-const SFX = {
-  eat:    ()=>{ playTone(523,'square',0.08,0.15); setTimeout(()=>playTone(659,'square',0.08,0.12),60); },
-  coin:   ()=>{ playTone(880,'sine',0.07,0.2); setTimeout(()=>playTone(1100,'sine',0.1,0.15),70); setTimeout(()=>playTone(1320,'sine',0.12,0.2),140); },
-  bonus:  ()=>{ playTone(440,'sawtooth',0.06,0.1); setTimeout(()=>playTone(660,'sawtooth',0.08,0.15),80); setTimeout(()=>playTone(880,'sawtooth',0.1,0.2),160); },
-  die:    ()=>{ playTone(220,'sawtooth',0.15,0.3,false); playTone(180,'sawtooth',0.15,0.3,false); setTimeout(()=>{ playTone(150,'sawtooth',0.2,0.4,true); },100); },
-  move:   ()=>{ playTone(110,'square',0.04,0.04,true); },
-  buy:    ()=>{ [523,659,784,1047].forEach((f,i)=>setTimeout(()=>playTone(f,'sine',0.1,0.15),i*60)); },
-  start:  ()=>{ [330,392,494,659].forEach((f,i)=>setTimeout(()=>playTone(f,'square',0.1,0.12),i*80)); },
-  level:  ()=>{ [523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>playTone(f,'square',0.12,0.14),i*70)); },
-};
-
-// Sound toggle button
-const soundBtn=document.getElementById('sound-toggle');
-soundBtn.textContent=soundOn?'🔊 TON':'🔇 STUMM';
-soundBtn.onclick=()=>{
-  soundOn=!soundOn; save('snake_sound',soundOn);
-  soundBtn.textContent=soundOn?'🔊 TON':'🔇 STUMM';
-};
-
-// ══════════════════════════════════════════════════════
-//  PROFILE + PASSWORD
+//  PROFILE
 // ══════════════════════════════════════════════════════
 let profile=load('snake_profile',null);
 
-// Simple hash (not cryptographic — good enough for local game passwords)
-function hashPw(pw){
-  let h=5381;
-  for(let i=0;i<pw.length;i++) h=((h<<5)+h)+pw.charCodeAt(i)|0;
-  return h.toString(36);
-}
-
-function createProfile(name, pw){
+function createProfile(name){
   profile={
     name:name.toUpperCase().trim()||'SPIELER',
-    pwHash: hashPw(pw),
     createdAt:Date.now(),
     totalPlaySeconds:0,
     gamesPlayed:0,
@@ -764,7 +467,6 @@ function createProfile(name, pw){
   save('snake_profile',profile);
 }
 function saveProfile(){save('snake_profile',profile);}
-function checkPassword(pw){ return profile && profile.pwHash === hashPw(pw); }
 
 let sessionStartTime=null;
 function startPlayTimer(){sessionStartTime=Date.now();}
@@ -789,30 +491,22 @@ function fmtDate(ts){
 //  SKINS
 // ══════════════════════════════════════════════════════
 const SKINS=[
-  // Classic — cool purple, unchanged
   {id:'classic',name:'CLASSIC',price:0,free:true,
    head:'#afa9ec',body:t=>`rgb(${80+t*47|0},${74+t*45|0},${183-t*40|0})`,glow:'#7f77dd',eye:'#0a0a0f'},
-  // Lodernde Flammen — deep crimson to charcoal ember, blood-orange glow
-  {id:'fire',name:'LODERNDE FLAMMEN',price:15,
-   head:'#ff2200',body:t=>`rgb(${200-t*80|0},${30+t*10|0},${t*5|0})`,glow:'#cc1100',eye:'#ff9900'},
-  // Ocean — deep navy to teal, bioluminescent glow
-  {id:'ocean',name:'OZEAN',price:20,
-   head:'#00cfff',body:t=>`rgb(0,${120+t*60|0},${180-t*70|0})`,glow:'#0077aa',eye:'#ffffff'},
-  // Natures Wrath — dark moss to bark brown, venomous yellow eye
-  {id:'forest',name:'NATURES WRATH',price:20,
-   head:'#2d5a1b',body:t=>`rgb(${25+t*40|0},${60-t*20|0},${10+t*8|0})`,glow:'#1a3a0a',eye:'#c8ff00'},
-  // Gold — burnished gold to dark bronze
-  {id:'gold',name:'GOLD',price:50,
-   head:'#ffd700',body:t=>`rgb(${220-t*60|0},${160-t*80|0},${t*5|0})`,glow:'#cc9900',eye:'#2a0a00'},
-  // Neon — electric magenta to violet
-  {id:'neon',name:'NEON',price:35,
-   head:'#ff00ff',body:t=>t<.5?`rgb(255,0,${255-t*400|0})`:`rgb(${(t-.5)*400|0},0,255)`,glow:'#dd00ff',eye:'#00ffff'},
-  // Frostbite — white-blue to deep arctic blue, icy cyan glow
-  {id:'ice',name:'FROSTBITE',price:30,
-   head:'#c8f0ff',body:t=>`rgb(${160-t*100|0},${210-t*110|0},${255-t*40|0})`,glow:'#44aadd',eye:'#001a33'},
-  // Toxic Waste — sickly yellow-green to murky sludge brown
-  {id:'toxic',name:'TOXIC WASTE',price:40,
-   head:'#b8ff00',body:t=>`rgb(${80+t*60|0},${180-t*120|0},${t*20|0})`,glow:'#6ebb00',eye:'#cc0000'},
+  {id:'fire',name:'FEUER 🔥',price:15,
+   head:'#ff6a00',body:t=>`rgb(${220-t*60|0},${80+t*20|0},0)`,glow:'#ff4400',eye:'#ffff00'},
+  {id:'ocean',name:'OZEAN 🌊',price:20,
+   head:'#00d4ff',body:t=>`rgb(0,${160+t*40|0},${200-t*60|0})`,glow:'#0099cc',eye:'#ffffff'},
+  {id:'forest',name:'WALD 🌿',price:20,
+   head:'#4caf50',body:t=>`rgb(${40+t*30|0},${130-t*40|0},${50+t*10|0})`,glow:'#2e7d32',eye:'#ffeb3b'},
+  {id:'gold',name:'GOLD 👑',price:50,
+   head:'#ffd700',body:t=>`rgb(${220-t*40|0},${180-t*60|0},0)`,glow:'#ffaa00',eye:'#3a1a00'},
+  {id:'neon',name:'NEON ⚡',price:35,
+   head:'#ff00ff',body:t=>t<.5?`rgb(255,0,${255-t*400|0})` : `rgb(${(t-.5)*400|0},0,255)`,glow:'#ff00ff',eye:'#00ffff'},
+  {id:'ice',name:'EIS ❄️',price:30,
+   head:'#e0f7ff',body:t=>`rgb(${180-t*60|0},${230-t*60|0},255)`,glow:'#80d8ff',eye:'#003366'},
+  {id:'toxic',name:'TOXIC ☢️',price:40,
+   head:'#aaff00',body:t=>`rgb(${100+t*50|0},${220-t*80|0},0)`,glow:'#88ff00',eye:'#ff0000'},
 ];
 
 let coins=load('snake_coins',0);
@@ -835,7 +529,7 @@ let score,level,state;
 let bonusTimer,coinTimer,sessionCoins;
 let stepMs,lastStepTime=0,rafId=null,interpT=0,prevSnake=[];
 
-function stepInterval(){return Math.max(60,(REMOTE.speed_base||180)-(level-1)*15);}
+function stepInterval(){return Math.max(80,180-(level-1)*15);}
 
 function init(){
   const mid=Math.floor(COLS/2);
@@ -893,22 +587,17 @@ function gridStep(){
   let ate=false;
   if(h.x===food.x&&h.y===food.y){
     score+=10*level;ate=true;
-    SFX.eat();
     food=rndPos();
-    if(score>=level*60){level=Math.min(10,level+1);stepMs=stepInterval();SFX.level();}
-    if(Math.random()<(REMOTE.coin_chance||0.25)&&!coinItem){coinItem=rndPos();coinTimer=80;}
+    if(score>=level*60){level=Math.min(10,level+1);stepMs=stepInterval();}
+    if(Math.random()<.25&&!coinItem){coinItem=rndPos();coinTimer=80;}
     if(Math.random()<.2&&!bonus){bonus=rndPos();bonusTimer=70;}
   } else if(coinItem&&h.x===coinItem.x&&h.y===coinItem.y){
-    const mult=coinMultiplier();
-    coins+=mult; sessionCoins+=mult;
-    profile.coinsEarned+=mult; saveProfile();
+    coins++;sessionCoins++;profile.coinsEarned++;saveProfile();
     save('snake_coins',coins);
-    SFX.coin();
-    ate=true; coinItem=null;
-    spawnCoinPopup(h, mult);
+    ate=true;coinItem=null;
     spawnCoinPopup(h);updateHUD();renderShop();
   } else if(bonus&&h.x===bonus.x&&h.y===bonus.y){
-    score+=25*level;ate=true;bonus=null;SFX.bonus();
+    score+=25*level;ate=true;bonus=null;
   } else {
     snake.pop();
     if(bonus){bonusTimer--;if(bonusTimer<=0)bonus=null;}
@@ -1013,12 +702,11 @@ function showOverlay(title,sub,sc,co){
   document.getElementById('overlay').classList.remove('hidden');
 }
 function hideOverlay(){document.getElementById('overlay').classList.add('hidden');}
-function spawnCoinPopup(pos, amt=1){
+function spawnCoinPopup(pos){
   const w=document.getElementById('game-wrapper');
   const el=document.createElement('div');
-  el.className='coin-popup';
-  el.textContent=`+${amt}🪙${amt>1?' BOOST!':''}`;
-  el.style.left=(pos.x*CELL+CELL/2-20)+'px';
+  el.className='coin-popup';el.textContent='+1 🪙';
+  el.style.left=(pos.x*CELL+CELL/2-14)+'px';
   el.style.top=(pos.y*CELL)+'px';
   w.appendChild(el);setTimeout(()=>el.remove(),900);
 }
@@ -1032,7 +720,6 @@ function startGame(){
     const hs=highScore,c=coins;
     init();highScore=hs;coins=c;updateHUD();
     profile.gamesPlayed++;saveProfile();
-    SFX.start();
   }
   state='playing';hideOverlay();
   document.getElementById('msg').textContent='Level '+level+' — Viel Erfolg!';
@@ -1047,7 +734,6 @@ function pauseGame(){
 }
 function endGame(){
   stopRaf();stopPlayTimer();state='dead';
-  SFX.die();
   profile.totalScore+=score;saveProfile();
   updateHUD();draw(1);
   showOverlay('GAME OVER',null,score,sessionCoins);
@@ -1074,136 +760,6 @@ function previewSkin(sk,cvs){
     if(i===0){c.fillStyle=sk.eye;c.beginPath();c.arc(x+12,y+5,1.8,0,Math.PI*2);c.fill();c.beginPath();c.arc(x+12,y+12,1.8,0,Math.PI*2);c.fill();}
   }
 }
-// ══════════════════════════════════════════════════════
-//  SHOP SUB-TABS
-// ══════════════════════════════════════════════════════
-function showShopTab(tab){
-  document.querySelectorAll('.shop-tab-btn').forEach((b,i)=>{
-    b.classList.toggle('active',
-      (tab==='skins'&&i===0)||(tab==='maps'&&i===1)||(tab==='codes'&&i===2));
-  });
-  document.getElementById('shop-skins').classList.toggle('visible',tab==='skins');
-  document.getElementById('shop-maps').classList.toggle('visible',tab==='maps');
-  document.getElementById('shop-codes').classList.toggle('visible',tab==='codes');
-  if(tab==='codes') renderBoosts();
-}
-
-// ══════════════════════════════════════════════════════
-//  BOOST / CODE SYSTEM
-// ══════════════════════════════════════════════════════
-// Each boost: { id, label, multiplier, expiresAt }
-let activeBoosts = load('snake_boosts', []);
-
-// Clean expired boosts on load
-activeBoosts = activeBoosts.filter(b=>b.expiresAt>Date.now());
-save('snake_boosts', activeBoosts);
-
-// Known codes — add more here anytime
-const CODES = {
-  'TESTFROMKYSSIE': {
-    id:'coin_boost_50',
-    label:'🪙 x2 Münz-Boost',
-    multiplier:2,
-    durationMs:15*60*1000,
-    hint:'50% Münz-Boost für 15 Minuten!',
-    expiresAt: new Date('2026-05-18T16:31:00').getTime(), // Läuft ab am 18.05.2026 um 16:31
-  },
-};
-
-const usedCodes = load('snake_used_codes', []);
-
-function coinMultiplier(){
-  const now=Date.now();
-  activeBoosts=activeBoosts.filter(b=>b.expiresAt>now);
-  // Take highest multiplier if multiple active
-  if(!activeBoosts.length) return 1;
-  return Math.max(...activeBoosts.map(b=>b.multiplier));
-}
-
-function redeemCode(raw){
-  const code=raw.trim().toUpperCase();
-  const msg=document.getElementById('code-msg');
-  if(!code){ msg.className='err'; msg.textContent='Kein Code eingegeben!'; return; }
-
-  const def=CODES[code];
-  if(!def){ msg.className='err'; msg.textContent='Ungultiger Code!'; return; }
-
-  // Check if code itself has expired
-  if(def.expiresAt && Date.now() > def.expiresAt){
-    msg.className='err'; msg.textContent='Dieser Code ist abgelaufen!'; return;
-  }
-  if(usedCodes.includes(code)){ msg.className='err'; msg.textContent='Code bereits benutzt!'; return; }
-
-  // Check if same boost already active
-  const now=Date.now();
-  const existing=activeBoosts.find(b=>b.id===def.id&&b.expiresAt>now);
-  if(existing){
-    // Extend by duration
-    existing.expiresAt+=def.durationMs;
-    save('snake_boosts',activeBoosts);
-    msg.className='ok'; msg.textContent='Boost verlangert!';
-  } else {
-    activeBoosts.push({id:def.id,label:def.label,multiplier:def.multiplier,expiresAt:now+def.durationMs});
-    save('snake_boosts',activeBoosts);
-    msg.className='ok'; msg.textContent=def.hint;
-    SFX.buy();
-  }
-
-  usedCodes.push(code);
-  save('snake_used_codes',usedCodes);
-  document.getElementById('code-input').value='';
-  renderBoosts();
-  updateBoostBar();
-}
-
-function renderBoosts(){
-  const now=Date.now();
-  activeBoosts=activeBoosts.filter(b=>b.expiresAt>now);
-  const box=document.getElementById('active-boosts-box');
-  const list=document.getElementById('active-boosts-list');
-  if(!activeBoosts.length){ box.style.display='none'; return; }
-  box.style.display='flex';
-  list.innerHTML=activeBoosts.map(b=>{
-    const rem=Math.max(0,Math.ceil((b.expiresAt-now)/1000));
-    const m=Math.floor(rem/60),s=rem%60;
-    return `${b.label} — noch ${m}m ${s}s`;
-  }).join('<br>');
-}
-
-// Boost bar (top of screen)
-let boostBarInterval=null;
-function updateBoostBar(){
-  const now=Date.now();
-  activeBoosts=activeBoosts.filter(b=>b.expiresAt>now);
-  const bar=document.getElementById('boost-bar');
-  const lbl=document.getElementById('boost-label');
-  if(!activeBoosts.length){
-    bar.style.display='none'; lbl.style.display='none';
-    if(boostBarInterval){clearInterval(boostBarInterval);boostBarInterval=null;}
-    return;
-  }
-  // Show boost with least time remaining
-  const b=activeBoosts.reduce((a,c)=>c.expiresAt<a.expiresAt?c:a);
-  const total=15*60*1000; // assume 15min base
-  const rem=b.expiresAt-now;
-  const pct=Math.max(0,rem/total);
-  bar.style.display='block'; lbl.style.display='block';
-  bar.style.transform=`scaleX(${pct})`;
-  const m=Math.floor(rem/60000),s=Math.floor((rem%60000)/1000);
-  lbl.textContent=`${b.label} — ${m}m ${s}s`;
-  if(!boostBarInterval){
-    boostBarInterval=setInterval(()=>{
-      updateBoostBar();
-      if(document.getElementById('shop-codes').classList.contains('visible'))renderBoosts();
-    },1000);
-  }
-}
-updateBoostBar();
-
-// Wire up code input
-document.getElementById('code-submit').onclick=()=>redeemCode(document.getElementById('code-input').value);
-document.getElementById('code-input').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('code-submit').click();});
-
 function renderShop(){
   const grid=document.getElementById('shop-grid');
   grid.innerHTML='';
@@ -1219,7 +775,7 @@ function renderShop(){
       b.onclick=()=>{equipped=sk.id;save('snake_equipped',equipped);renderShop();draw(1);};
     } else if(canAfford){
       b.className='skin-badge buy-b';b.textContent='🪙 '+sk.price;
-      b.onclick=()=>{if(coins<sk.price)return;coins-=sk.price;owned.push(sk.id);save('snake_coins',coins);save('snake_owned',owned);SFX.buy();updateHUD();renderShop();};
+      b.onclick=()=>{if(coins<sk.price)return;coins-=sk.price;owned.push(sk.id);save('snake_coins',coins);save('snake_owned',owned);updateHUD();renderShop();};
     } else {b.className='skin-badge cant-b';b.textContent='🪙 '+sk.price;}
     card.appendChild(b);grid.appendChild(card);
   });
@@ -1261,6 +817,7 @@ setInterval(()=>{
 },10000);
 
 function switchDevice(){
+  // Go back to device selection without clearing save data
   localStorage.removeItem('snake_device');
   location.reload();
 }
@@ -1275,7 +832,7 @@ function showTab(tab){
   document.getElementById('game-panel').classList.toggle('visible',tab==='game');
   document.getElementById('shop-panel').classList.toggle('visible',tab==='shop');
   document.getElementById('profile-panel').classList.toggle('visible',tab==='profile');
-  if(tab==='shop'){ renderShop(); showShopTab('skins'); }
+  if(tab==='shop')renderShop();
   if(tab==='profile')renderProfile();
 }
 
@@ -1314,7 +871,8 @@ document.getElementById('dpad-pause').onclick=()=>{if(state==='idle'||state==='d
 //  BOOT FLOW
 // ══════════════════════════════════════════════════════
 function goToMain(){
-  ['setup-screen','device-screen','login-screen'].forEach(id=>document.getElementById(id).classList.remove('active'));
+  document.getElementById('setup-screen').classList.remove('active');
+  document.getElementById('device-screen').classList.remove('active');
   document.getElementById('main-screen').classList.add('active');
   updateHUD();init();draw(1);
   showOverlay('SNAKE',null,null,null);
@@ -1323,57 +881,20 @@ function goToMain(){
 function goToSetup(){
   document.getElementById('device-screen').classList.remove('active');
   document.getElementById('setup-screen').classList.add('active');
-  const nameInp=document.getElementById('prof-name-input');
-  const pwInp  =document.getElementById('prof-pw-input');
-  const pw2Inp =document.getElementById('prof-pw2-input');
-  const err    =document.getElementById('setup-err');
-
+  const inp=document.getElementById('prof-name-input');
   document.getElementById('setup-confirm').onclick=()=>{
-    const name=nameInp.value.trim();
-    const pw  =pwInp.value;
-    const pw2 =pw2Inp.value;
-    if(!name){ nameInp.style.borderColor='var(--red)'; return; }
-    if(pw.length<4){ err.textContent='Passwort mind. 4 Zeichen'; err.style.display='block'; return; }
-    if(pw!==pw2){ err.textContent='Passwörter stimmen nicht überein'; err.style.display='block'; return; }
-    err.style.display='none';
-    createProfile(name, pw);
+    const name=inp.value.trim();
+    if(!name){inp.style.borderColor='var(--red)';return;}
+    createProfile(name);
     goToMain();
   };
-  [nameInp,pwInp,pw2Inp].forEach(inp=>inp.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('setup-confirm').click();}));
-}
-
-function goToLogin(){
-  ['setup-screen','device-screen'].forEach(id=>document.getElementById(id).classList.remove('active'));
-  document.getElementById('login-screen').classList.add('active');
-  document.getElementById('login-playername').textContent=profile?profile.name:'';
-  const pwInp=document.getElementById('login-pw-input');
-  const err  =document.getElementById('login-err');
-  pwInp.value=''; err.style.display='none';
-
-  document.getElementById('login-confirm').onclick=()=>{
-    if(checkPassword(pwInp.value)){
-      err.style.display='none';
-      goToMain();
-    } else {
-      err.style.display='block';
-      pwInp.value='';
-      pwInp.style.borderColor='var(--red)';
-      setTimeout(()=>{ pwInp.style.borderColor=''; err.style.display='none'; },2000);
-    }
-  };
-  pwInp.addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('login-confirm').click(); });
-
-  document.getElementById('login-reset').onclick=()=>{
-    if(confirm('Profil wirklich löschen? Alle Daten gehen verloren.')){
-      localStorage.clear(); location.reload();
-    }
-  };
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('setup-confirm').click();});
 }
 
 function selectDevice(mode){
   applyDevice(mode);
   if(!profile) goToSetup();
-  else goToLogin();
+  else goToMain();
 }
 
 document.getElementById('btn-mobile').onclick=()=>selectDevice('mobile');
@@ -1383,7 +904,7 @@ document.getElementById('btn-pc').onclick=()=>selectDevice('pc');
 if(deviceMode){
   applyDevice(deviceMode);
   if(!profile) goToSetup();
-  else goToLogin();
+  else goToMain();
 }
 // else: device-screen stays active, user picks
 </script>
