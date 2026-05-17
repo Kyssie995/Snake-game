@@ -1,367 +1,336 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Snake Admin Panel</title>
+<title>Snake Admin — v5</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-
 :root{
-  --bg:#0a0a0f; --panel:#0f0f1a; --border:#2a2a4a;
-  --accent:#7f77dd; --accent2:#afa9ec;
-  --text:#e0deff; --muted:#5a5880;
-  --green:#1d9e75; --red:#c0392b; --yellow:#f5c518;
-  --mono:'JetBrains Mono',monospace;
-  --pixel:'Press Start 2P',monospace;
+  --bg:#0a0a0f;--border:#2a2a4a;--accent:#7f77dd;--accent2:#afa9ec;
+  --text:#e0deff;--muted:#5a5880;--green:#1d9e75;--red:#c0392b;--yellow:#f5c518;
+  --mono:'JetBrains Mono',monospace;--pixel:'Press Start 2P',monospace;
 }
-
-body{
-  background:var(--bg); color:var(--text);
-  font-family:var(--mono); min-height:100vh;
-  display:flex; align-items:center; justify-content:center;
-  padding:1rem;
-}
-body::before{
-  content:''; position:fixed; inset:0; pointer-events:none;
-  background:
-    repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(127,119,221,.03) 40px),
-    repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(127,119,221,.03) 40px);
-}
-
-/* ── LOGIN ── */
-#login-screen{
-  position:relative; z-index:1;
-  display:flex; flex-direction:column; align-items:center; gap:1.2rem;
-  width:100%; max-width:360px;
-}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem;}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(127,119,221,.03) 40px),repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(127,119,221,.03) 40px);}
+#login-screen{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:1.2rem;width:100%;max-width:360px;margin-top:15vh;}
 #login-screen h1{font-family:var(--pixel);font-size:14px;color:var(--accent2);letter-spacing:.12em;text-align:center;}
 #login-screen p{font-size:12px;color:var(--muted);}
-
-/* ── ADMIN ── */
-#admin-screen{
-  display:none; position:relative; z-index:1;
-  flex-direction:column; gap:1.2rem;
-  width:100%; max-width:680px;
-}
-
-h1.title{font-family:var(--pixel);font-size:12px;color:var(--accent2);letter-spacing:.1em;}
+#admin-screen{display:none;position:relative;z-index:1;flex-direction:column;gap:1.2rem;width:100%;max-width:720px;}
+h1.title{font-family:var(--pixel);font-size:11px;color:var(--accent2);letter-spacing:.1em;}
 .subtitle{font-size:11px;color:var(--muted);}
-
-/* ── CARD ── */
-.card{
-  border:1px solid var(--border); background:rgba(15,15,26,.9);
-  padding:18px; display:flex; flex-direction:column; gap:14px;
-}
-.card-title{
-  font-family:var(--pixel); font-size:8px; color:var(--accent2);
-  letter-spacing:.08em; padding-bottom:10px;
-  border-bottom:1px solid var(--border);
-}
-
-/* ── FIELD ── */
-.field{ display:flex; flex-direction:column; gap:6px; }
-.field label{ font-size:11px; color:var(--muted); }
-.field input, .field select{
-  background:rgba(127,119,221,.06); border:1px solid var(--border);
-  color:var(--text); font-family:var(--mono); font-size:13px;
-  padding:9px 11px; outline:none; width:100%;
-  transition:border-color .15s;
-}
-.field input:focus{ border-color:var(--accent); }
-.field .hint{ font-size:10px; color:var(--muted); }
-
-/* range slider */
-.field input[type=range]{ padding:0; background:transparent; border:none; cursor:pointer; }
-.range-row{ display:flex; align-items:center; gap:10px; }
-.range-val{ font-size:13px; color:var(--accent2); min-width:40px; }
-
-/* ── BUTTONS ── */
-.btn{
-  background:transparent; border:2px solid var(--accent); color:var(--accent2);
-  font-family:var(--pixel); font-size:7px; padding:10px 16px;
-  cursor:pointer; letter-spacing:.08em; transition:background .15s, box-shadow .15s;
-  width:100%;
-}
-.btn:hover{ background:rgba(127,119,221,.15); box-shadow:0 0 12px rgba(127,119,221,.4); }
-.btn.danger{ border-color:var(--red); color:var(--red); }
-.btn.danger:hover{ background:rgba(192,57,43,.15); }
-.btn.success{ border-color:var(--green); color:var(--green); }
-.btn.sm{ font-size:6px; padding:7px 10px; width:auto; }
-
-/* ── STATUS ── */
-#status{
-  font-size:11px; padding:10px 14px;
-  border:1px solid var(--border); display:none;
-  align-items:center; gap:8px;
-}
-#status.ok{ border-color:var(--green); color:var(--green); display:flex; }
-#status.err{ border-color:var(--red); color:var(--red); display:flex; }
-#status.loading{ border-color:var(--muted); color:var(--muted); display:flex; }
-
-/* ── SKIN GRID ── */
-.skin-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
-.skin-row{ display:flex; align-items:center; gap:10px; }
-.skin-label{ font-size:11px; color:var(--text); flex:1; }
-.skin-input{ width:80px !important; text-align:center; }
-
-/* ── VERSION BADGE ── */
-.ver-badge{
-  display:inline-block; font-family:var(--pixel); font-size:6px;
-  padding:4px 8px; border:1px solid var(--accent); color:var(--accent2);
-}
-
-/* ── LIVE INDICATOR ── */
-.live-dot{
-  display:inline-block; width:8px; height:8px; border-radius:50%;
-  background:var(--green); box-shadow:0 0 6px var(--green);
-  animation:pulse 1.5s infinite;
-}
+.card{border:1px solid var(--border);background:rgba(15,15,26,.9);padding:18px;display:flex;flex-direction:column;gap:14px;}
+.card-title{font-family:var(--pixel);font-size:7px;color:var(--accent2);letter-spacing:.08em;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.card-title span{float:right;font-size:6px;color:var(--muted);font-family:var(--mono);}
+.field{display:flex;flex-direction:column;gap:6px;}
+.field label{font-size:11px;color:var(--muted);}
+.field input{background:rgba(127,119,221,.06);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:13px;padding:9px 11px;outline:none;width:100%;transition:border-color .15s;}
+.field input:focus{border-color:var(--accent);}
+.field .hint{font-size:10px;color:var(--muted);}
+.field input[type=range]{padding:0;background:transparent;border:none;cursor:pointer;}
+.range-row{display:flex;align-items:center;gap:10px;}
+.range-val{font-size:13px;color:var(--accent2);min-width:44px;}
+.btn{background:transparent;border:2px solid var(--accent);color:var(--accent2);font-family:var(--pixel);font-size:7px;padding:10px 16px;cursor:pointer;letter-spacing:.08em;transition:background .15s,box-shadow .15s;width:100%;}
+.btn:hover{background:rgba(127,119,221,.15);box-shadow:0 0 12px rgba(127,119,221,.4);}
+.btn.danger{border-color:var(--red);color:var(--red);}
+.btn.danger:hover{background:rgba(192,57,43,.15);}
+.btn.success{border-color:var(--green);color:var(--green);}
+.btn.success:hover{background:rgba(29,158,117,.15);}
+.btn.warn{border-color:var(--yellow);color:var(--yellow);}
+.btn.sm{font-size:6px;padding:7px 10px;width:auto;}
+#status{font-size:11px;padding:10px 14px;border:1px solid var(--border);display:none;align-items:center;gap:8px;}
+#status.ok{border-color:var(--green);color:var(--green);display:flex;}
+#status.err{border-color:var(--red);color:var(--red);display:flex;}
+#status.loading{border-color:var(--muted);color:var(--muted);display:flex;}
+.skin-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+.skin-row{display:flex;align-items:center;gap:10px;}
+.skin-label{font-size:11px;color:var(--text);flex:1;}
+.skin-input{width:80px!important;text-align:center;}
+.ver-badge{display:inline-block;font-family:var(--pixel);font-size:6px;padding:4px 8px;border:1px solid var(--accent);color:var(--accent2);}
+.min-ver-badge{display:inline-block;font-family:var(--pixel);font-size:6px;padding:4px 8px;border:1px solid var(--red);color:var(--red);}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite;}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-
-.top-bar{
-  display:flex; align-items:center; justify-content:space-between;
-  flex-wrap:wrap; gap:8px;
-}
-.top-bar-right{ display:flex; align-items:center; gap:10px; font-size:11px; color:var(--muted); }
-
-/* scrollbar */
+.top-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+.top-bar-right{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted);}
+.code-table{width:100%;border-collapse:collapse;font-size:10px;}
+.code-table th{color:var(--muted);font-family:var(--mono);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;}
+.code-table td{padding:6px 8px;border-bottom:1px solid rgba(42,42,74,.4);color:var(--text);}
+.code-table tr:last-child td{border-bottom:none;}
+.usage-bar{height:4px;background:var(--border);border-radius:2px;margin-top:3px;}
+.usage-fill{height:4px;background:var(--accent2);border-radius:2px;}
+.usage-fill.full{background:var(--red);}
+.kill-zone{border-color:rgba(192,57,43,.5);}
+.kill-zone .card-title{color:var(--red);}
+.kill-input{background:rgba(192,57,43,.08)!important;border-color:rgba(192,57,43,.4)!important;color:var(--red)!important;}
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border);}
 </style>
 </head>
 <body>
 
-<!-- ── LOGIN ── -->
 <div id="login-screen">
   <h1>SNAKE ADMIN</h1>
-  <p>Dev-Passwort eingeben</p>
+  <p>Enter dev password</p>
   <div class="field" style="width:100%">
-    <input type="password" id="pw-input" placeholder="Passwort..." autocomplete="off">
+    <input type="password" id="pw-input" placeholder="Password..." autocomplete="off">
   </div>
-  <button class="btn" id="pw-btn">▶ ANMELDEN</button>
-  <div id="login-err" style="font-size:11px;color:#c0392b;display:none">Falsches Passwort</div>
+  <button class="btn" id="pw-btn">▶ LOGIN</button>
+  <div id="login-err" style="font-size:11px;color:#c0392b;display:none">Wrong password</div>
 </div>
 
-<!-- ── ADMIN ── -->
 <div id="admin-screen">
 
   <div class="top-bar">
-    <h1 class="title">SNAKE ADMIN</h1>
+    <h1 class="title">SNAKE ADMIN v5</h1>
     <div class="top-bar-right">
       <span class="live-dot"></span> Live
-      <span class="ver-badge" id="cur-version">v4.1</span>
+      <span class="ver-badge" id="cur-version">v5</span>
+      <span class="min-ver-badge" id="cur-min-version">min: —</span>
       <button class="btn sm" id="logout-btn">LOGOUT</button>
     </div>
   </div>
-  <p class="subtitle">Änderungen werden sofort für alle Spieler aktiv.</p>
+  <p class="subtitle">Changes go live for all players within 30 seconds.</p>
 
   <div id="status"></div>
 
-  <!-- GAME CONFIG -->
   <div class="card">
-    <div class="card-title">SPIEL EINSTELLUNGEN</div>
-
+    <div class="card-title">GAME SETTINGS</div>
     <div class="field">
-      <label>Version (Spieler mit älterer Version werden neu geladen)</label>
-      <input type="text" id="cfg-version" placeholder="4.1" maxlength="10">
+      <label>Current Version</label>
+      <input type="text" id="cfg-version" placeholder="5" maxlength="10">
     </div>
-
     <div class="field">
-      <label>Grundgeschwindigkeit (ms pro Schritt — niedriger = schneller)</label>
+      <label>Base Speed (ms per step — lower = faster)</label>
       <div class="range-row">
         <input type="range" id="cfg-speed" min="60" max="300" step="10">
         <span class="range-val" id="cfg-speed-val">180</span> ms
       </div>
-      <span class="hint">Standard: 180ms | Schnell: 80ms | Langsam: 300ms</span>
+      <span class="hint">Default: 180ms | Fast: 80ms | Slow: 300ms</span>
     </div>
-
     <div class="field">
-      <label>Münz-Spawn Chance (pro Futter gefressen)</label>
+      <label>Coin Spawn Chance</label>
       <div class="range-row">
         <input type="range" id="cfg-coin" min="0" max="1" step="0.05">
         <span class="range-val" id="cfg-coin-val">25%</span>
       </div>
-      <span class="hint">Standard: 25% | Event: 100% | Aus: 0%</span>
+      <span class="hint">Default: 25% | Event: 100% | Off: 0%</span>
     </div>
   </div>
 
-  <!-- MESSAGE -->
   <div class="card">
-    <div class="card-title">SERVER NACHRICHT</div>
+    <div class="card-title">SERVER MESSAGE</div>
     <div class="field">
-      <label>Nachricht an alle Spieler (leer lassen = keine Nachricht)</label>
-      <input type="text" id="cfg-message" placeholder="z.B. Wartung um 20:00 Uhr..." maxlength="120">
-      <span class="hint">Erscheint als Banner unten im Spiel. Spieler können es wegtippen.</span>
+      <label>Message to all players (empty = no message)</label>
+      <input type="text" id="cfg-message" placeholder="e.g. Event live now!..." maxlength="120">
+      <span class="hint">Banner shown in-game. Players can dismiss it.</span>
     </div>
   </div>
 
-  <!-- SKIN PRICES -->
   <div class="card">
-    <div class="card-title">SKIN PREISE (Munzen)</div>
+    <div class="card-title">SKIN PRICES (coins)</div>
     <div class="skin-grid">
-      <div class="skin-row"><span class="skin-label">LODERNDE FLAMMEN</span><input class="skin-input" type="number" id="cfg-fire" min="0" max="9999"></div>
-      <div class="skin-row"><span class="skin-label">OZEAN</span><input class="skin-input" type="number" id="cfg-ocean" min="0" max="9999"></div>
+      <div class="skin-row"><span class="skin-label">BLAZING FLAMES</span><input class="skin-input" type="number" id="cfg-fire" min="0" max="9999"></div>
+      <div class="skin-row"><span class="skin-label">POSEIDON</span><input class="skin-input" type="number" id="cfg-ocean" min="0" max="9999"></div>
       <div class="skin-row"><span class="skin-label">NATURES WRATH</span><input class="skin-input" type="number" id="cfg-forest" min="0" max="9999"></div>
-      <div class="skin-row"><span class="skin-label">GOLD</span><input class="skin-input" type="number" id="cfg-gold" min="0" max="9999"></div>
+      <div class="skin-row"><span class="skin-label">MIDAS</span><input class="skin-input" type="number" id="cfg-gold" min="0" max="9999"></div>
       <div class="skin-row"><span class="skin-label">NEON</span><input class="skin-input" type="number" id="cfg-neon" min="0" max="9999"></div>
       <div class="skin-row"><span class="skin-label">FROSTBITE</span><input class="skin-input" type="number" id="cfg-ice" min="0" max="9999"></div>
       <div class="skin-row"><span class="skin-label">TOXIC WASTE</span><input class="skin-input" type="number" id="cfg-toxic" min="0" max="9999"></div>
     </div>
   </div>
 
-  <button class="btn success" id="save-btn">SPEICHERN & LIVE SENDEN</button>
-  <button class="btn danger" id="reload-all-btn">ALLE SPIELER NEU LADEN</button>
+  <div class="card">
+    <div class="card-title">CODE USAGE <span id="code-refresh-btn" style="cursor:pointer;color:var(--accent2)" onclick="loadCodeUsage()">↻ refresh</span></div>
+    <table class="code-table">
+      <thead><tr><th>CODE</th><th>USED</th><th>LIMIT</th><th>STATUS</th></tr></thead>
+      <tbody id="code-tbody">
+        <tr><td colspan="4" style="color:var(--muted)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card kill-zone">
+    <div class="card-title">⚠ VERSION KILL SWITCH <span>Blocks all versions below minimum</span></div>
+    <div class="field">
+      <label style="color:var(--red)">Minimum Required Version</label>
+      <input type="text" id="cfg-min-version" class="kill-input" placeholder="e.g. 4.4" maxlength="10">
+      <span class="hint" style="color:rgba(192,57,43,.7)">4.4 → blocks v4.1, v4.2, v4.3 &nbsp;|&nbsp; 5 → blocks everything below v5</span>
+    </div>
+    <button class="btn danger" id="kill-btn">⚡ APPLY KILL SWITCH</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <button class="btn success" id="save-btn">💾 SAVE & GO LIVE</button>
+    <button class="btn warn" id="reload-all-btn">⟳ RELOAD ALL PLAYERS</button>
+  </div>
 
 </div>
 
 <script>
 'use strict';
+const SB_URL='https://fvzuwkeiefddwphudogl.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2enV3a2VpZWZkZHdwaHVkb2dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5MjEwNjQsImV4cCI6MjA5NDQ5NzA2NH0.PT3K45FghL4-4W1bMjynCcbO3DxqnIF2iG35d-Vttfg';
 
-const SB_URL = 'https://fvzuwkeiefddwphudogl.supabase.co';
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2enV3a2VpZWZkZHdwaHVkb2dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5MjEwNjQsImV4cCI6MjA5NDQ5NzA2NH0.PT3K45FghL4-4W1bMjynCcbO3DxqnIF2iG35d-Vttfg';
+// ── CHANGE THIS ──
+const ADMIN_PASSWORD='snake-dev-2025';
 
-// ── CHANGE THIS TO YOUR OWN PASSWORD ──
-const ADMIN_PASSWORD = 'snake-dev-2025';
-
-// ── LOGIN ──
-const pwInput = document.getElementById('pw-input');
-const loginErr = document.getElementById('login-err');
-
-document.getElementById('pw-btn').onclick = doLogin;
-pwInput.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
-
-function doLogin(){
-  if(pwInput.value === ADMIN_PASSWORD){
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('admin-screen').style.display = 'flex';
-    loadConfig();
-  } else {
-    loginErr.style.display = 'block';
-    pwInput.value = '';
-    pwInput.style.borderColor = '#c0392b';
-    setTimeout(()=>{ pwInput.style.borderColor=''; loginErr.style.display='none'; }, 2000);
-  }
-}
-
-document.getElementById('logout-btn').onclick = () => {
-  document.getElementById('admin-screen').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
-  pwInput.value = '';
+const CODE_DEFS={
+  'TESTFROMKYSSIE':{limit:null, label:'x2 Coin Boost 15min'},
+  'STARBLOSSOM':   {limit:2,    label:'Unlock Starblossom skin'},
+  '10KCOINZZZ':    {limit:1,    label:'+10,000 coins'},
 };
 
-// ── RANGE DISPLAY ──
-const speedSlider = document.getElementById('cfg-speed');
-const speedVal    = document.getElementById('cfg-speed-val');
-speedSlider.oninput = () => speedVal.textContent = speedSlider.value;
+const H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=minimal'};
 
-const coinSlider = document.getElementById('cfg-coin');
-const coinVal    = document.getElementById('cfg-coin-val');
-coinSlider.oninput = () => coinVal.textContent = Math.round(coinSlider.value*100)+'%';
+const pwInput=document.getElementById('pw-input');
+document.getElementById('pw-btn').onclick=doLogin;
+pwInput.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
-// ── STATUS ──
-function setStatus(type, msg){
-  const el = document.getElementById('status');
-  el.className = type; el.textContent = msg;
+function doLogin(){
+  if(pwInput.value===ADMIN_PASSWORD){
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('admin-screen').style.display='flex';
+    loadConfig();loadCodeUsage();
+  } else {
+    document.getElementById('login-err').style.display='block';
+    pwInput.value='';pwInput.style.borderColor='#c0392b';
+    setTimeout(()=>{pwInput.style.borderColor='';document.getElementById('login-err').style.display='none';},2000);
+  }
 }
+document.getElementById('logout-btn').onclick=()=>{
+  document.getElementById('admin-screen').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+  pwInput.value='';
+};
 
-// ── SUPABASE HELPERS ──
-async function sbGet(){
-  const res = await fetch(`${SB_URL}/rest/v1/game_config?select=key,value`, {
-    headers:{ 'apikey':SB_KEY, 'Authorization':'Bearer '+SB_KEY }
-  });
+const speedSlider=document.getElementById('cfg-speed');
+const speedVal=document.getElementById('cfg-speed-val');
+speedSlider.oninput=()=>speedVal.textContent=speedSlider.value;
+const coinSlider=document.getElementById('cfg-coin');
+const coinVal=document.getElementById('cfg-coin-val');
+coinSlider.oninput=()=>coinVal.textContent=Math.round(coinSlider.value*100)+'%';
+
+function setStatus(type,msg){const el=document.getElementById('status');el.className=type;el.textContent=msg;}
+
+async function sbGet(table,params=''){
+  const res=await fetch(`${SB_URL}/rest/v1/${table}${params}`,{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
   if(!res.ok) throw new Error('Fetch failed: '+res.status);
   return res.json();
 }
-
-async function sbSet(key, value){
-  const res = await fetch(`${SB_URL}/rest/v1/game_config?key=eq.${encodeURIComponent(key)}`, {
-    method:'PATCH',
-    headers:{
-      'apikey':SB_KEY, 'Authorization':'Bearer '+SB_KEY,
-      'Content-Type':'application/json', 'Prefer':'return=minimal'
-    },
-    body: JSON.stringify({ value: String(value), updated_at: new Date().toISOString() })
+async function sbSet(key,value){
+  const res=await fetch(`${SB_URL}/rest/v1/game_config?key=eq.${encodeURIComponent(key)}`,{
+    method:'PATCH',headers:H,body:JSON.stringify({value:String(value),updated_at:new Date().toISOString()})
   });
-  if(!res.ok) throw new Error(`Update failed for ${key}: ${res.status}`);
+  if(!res.ok) throw new Error('Update failed for '+key+': '+res.status);
 }
 
-// ── LOAD CONFIG ──
 async function loadConfig(){
-  setStatus('loading', 'Lade Konfiguration...');
-  try {
-    const rows = await sbGet();
-    const cfg = {};
-    rows.forEach(r => cfg[r.key] = r.value);
+  setStatus('loading','Loading config...');
+  try{
+    const rows=await sbGet('game_config','?select=key,value');
+    const cfg={};rows.forEach(r=>cfg[r.key]=r.value);
+    document.getElementById('cfg-version').value   =cfg.version||'5';
+    document.getElementById('cfg-min-version').value=cfg.min_version||'4.4';
+    speedSlider.value=cfg.speed_base||180; speedVal.textContent=speedSlider.value;
+    coinSlider.value=cfg.coin_chance||0.25; coinVal.textContent=Math.round((parseFloat(cfg.coin_chance)||0.25)*100)+'%';
+    document.getElementById('cfg-message').value  =cfg.message||'';
+    document.getElementById('cfg-fire').value     =cfg.skin_fire_price||15;
+    document.getElementById('cfg-ocean').value    =cfg.skin_ocean_price||20;
+    document.getElementById('cfg-forest').value   =cfg.skin_forest_price||20;
+    document.getElementById('cfg-gold').value     =cfg.skin_gold_price||50;
+    document.getElementById('cfg-neon').value     =cfg.skin_neon_price||35;
+    document.getElementById('cfg-ice').value      =cfg.skin_ice_price||30;
+    document.getElementById('cfg-toxic').value    =cfg.skin_toxic_price||40;
+    document.getElementById('cur-version').textContent    ='v'+(cfg.version||'5');
+    document.getElementById('cur-min-version').textContent='min: '+(cfg.min_version||'—');
+    setStatus('ok','Config loaded');
+    setTimeout(()=>document.getElementById('status').className='',2000);
+  } catch(e){setStatus('err','Error: '+e.message);}
+}
 
-    document.getElementById('cfg-version').value  = cfg.version     || '4.1';
-    speedSlider.value = cfg.speed_base || 180;
-    speedVal.textContent = speedSlider.value;
-    coinSlider.value = cfg.coin_chance || 0.25;
-    coinVal.textContent = Math.round((parseFloat(cfg.coin_chance)||0.25)*100)+'%';
-    document.getElementById('cfg-message').value  = cfg.message      || '';
-    document.getElementById('cfg-fire').value     = cfg.skin_fire_price   || 15;
-    document.getElementById('cfg-ocean').value    = cfg.skin_ocean_price  || 20;
-    document.getElementById('cfg-forest').value   = cfg.skin_forest_price || 20;
-    document.getElementById('cfg-gold').value     = cfg.skin_gold_price   || 50;
-    document.getElementById('cfg-neon').value     = cfg.skin_neon_price   || 35;
-    document.getElementById('cfg-ice').value      = cfg.skin_ice_price    || 30;
-    document.getElementById('cfg-toxic').value    = cfg.skin_toxic_price  || 40;
-
-    document.getElementById('cur-version').textContent = 'v'+(cfg.version||'4.1');
-    setStatus('ok', 'Konfiguration geladen');
-    setTimeout(()=>document.getElementById('status').className='', 2000);
-  } catch(e) {
-    setStatus('err', 'Fehler: '+e.message);
+async function loadCodeUsage(){
+  const tbody=document.getElementById('code-tbody');
+  tbody.innerHTML='<tr><td colspan="4" style="color:var(--muted)">Loading...</td></tr>';
+  try{
+    const rows=await sbGet('code_uses','?select=code,uses');
+    const usageMap={};rows.forEach(r=>usageMap[r.code]=r.uses||0);
+    tbody.innerHTML='';
+    Object.entries(CODE_DEFS).forEach(([code,def])=>{
+      const used=usageMap[code]||0;
+      const limit=def.limit;
+      const full=limit!==null&&used>=limit;
+      const pct=limit?Math.min(100,Math.round(used/limit*100)):0;
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td><strong style="color:var(--accent2);font-size:9px">${code}</strong><br>
+            <span style="color:var(--muted);font-size:9px">${def.label}</span></td>
+        <td style="font-size:11px;color:${full?'var(--red)':'var(--text)'}">${used}</td>
+        <td style="font-size:11px;color:var(--muted)">${limit===null?'∞':limit}</td>
+        <td><span style="font-size:9px;color:${full?'var(--red)':used>0?'var(--yellow)':'var(--green)'}">
+          ${full?'EXHAUSTED':used>0?'PARTIAL':'AVAILABLE'}</span>
+          ${limit?`<div class="usage-bar"><div class="usage-fill ${full?'full':''}" style="width:${pct}%"></div></div>`:''}
+        </td>`;
+      tbody.appendChild(tr);
+    });
+    rows.filter(r=>!CODE_DEFS[r.code]).forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td style="color:var(--muted);font-size:9px">${r.code}</td><td>${r.uses}</td><td>?</td><td style="color:var(--muted);font-size:9px">UNKNOWN</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch(e){
+    tbody.innerHTML=`<tr><td colspan="4" style="color:var(--red)">Error: ${e.message}</td></tr>`;
   }
 }
 
-// ── SAVE ALL ──
-document.getElementById('save-btn').onclick = async () => {
-  setStatus('loading', 'Speichere...');
-  const updates = [
-    ['version',           document.getElementById('cfg-version').value.trim() || '4.1'],
-    ['speed_base',        speedSlider.value],
-    ['coin_chance',       coinSlider.value],
-    ['message',           document.getElementById('cfg-message').value.trim()],
-    ['skin_fire_price',   document.getElementById('cfg-fire').value],
-    ['skin_ocean_price',  document.getElementById('cfg-ocean').value],
-    ['skin_forest_price', document.getElementById('cfg-forest').value],
-    ['skin_gold_price',   document.getElementById('cfg-gold').value],
-    ['skin_neon_price',   document.getElementById('cfg-neon').value],
-    ['skin_ice_price',    document.getElementById('cfg-ice').value],
-    ['skin_toxic_price',  document.getElementById('cfg-toxic').value],
+document.getElementById('save-btn').onclick=async()=>{
+  setStatus('loading','Saving...');
+  const updates=[
+    ['version',          document.getElementById('cfg-version').value.trim()||'5'],
+    ['min_version',      document.getElementById('cfg-min-version').value.trim()||'4.4'],
+    ['speed_base',       speedSlider.value],
+    ['coin_chance',      coinSlider.value],
+    ['message',          document.getElementById('cfg-message').value.trim()],
+    ['skin_fire_price',  document.getElementById('cfg-fire').value],
+    ['skin_ocean_price', document.getElementById('cfg-ocean').value],
+    ['skin_forest_price',document.getElementById('cfg-forest').value],
+    ['skin_gold_price',  document.getElementById('cfg-gold').value],
+    ['skin_neon_price',  document.getElementById('cfg-neon').value],
+    ['skin_ice_price',   document.getElementById('cfg-ice').value],
+    ['skin_toxic_price', document.getElementById('cfg-toxic').value],
   ];
-  try {
-    for(const [k,v] of updates) await sbSet(k, v);
-    document.getElementById('cur-version').textContent = 'v'+document.getElementById('cfg-version').value;
-    setStatus('ok', 'Gespeichert! Alle Spieler erhalten das Update in max. 30 Sek.');
-    setTimeout(()=>document.getElementById('status').className='', 4000);
-  } catch(e) {
-    setStatus('err', 'Fehler: '+e.message);
-  }
+  try{
+    for(const [k,v] of updates) await sbSet(k,v);
+    document.getElementById('cur-version').textContent='v'+document.getElementById('cfg-version').value;
+    document.getElementById('cur-min-version').textContent='min: '+document.getElementById('cfg-min-version').value;
+    setStatus('ok','Saved! Players update within 30 sec.');
+    setTimeout(()=>document.getElementById('status').className='',4000);
+  } catch(e){setStatus('err','Error: '+e.message);}
 };
 
-// ── FORCE RELOAD ALL ──
-document.getElementById('reload-all-btn').onclick = async () => {
-  if(!confirm('Alle Spieler werden in 5 Sekunden neu geladen. Sicher?')) return;
-  setStatus('loading', 'Sende Reload-Signal...');
-  try {
-    // Bump version to something temporary → triggers reload in all clients
-    const cur = document.getElementById('cfg-version').value.trim();
-    await sbSet('version', cur+'_reload');
-    setTimeout(async ()=>{
-      await sbSet('version', cur);
-      setStatus('ok', 'Reload-Signal gesendet!');
-    }, 6000);
-  } catch(e) {
-    setStatus('err', 'Fehler: '+e.message);
-  }
+document.getElementById('kill-btn').onclick=async()=>{
+  const minV=document.getElementById('cfg-min-version').value.trim();
+  if(!minV){setStatus('err','Enter a minimum version first');return;}
+  if(!confirm(`Block ALL versions below v${minV}? This is immediate.`)) return;
+  setStatus('loading','Applying kill switch...');
+  try{
+    await sbSet('min_version',minV);
+    document.getElementById('cur-min-version').textContent='min: '+minV;
+    setStatus('ok','Kill switch active — versions below v'+minV+' are now blocked.');
+  } catch(e){setStatus('err','Error: '+e.message);}
 };
 
-// Auto-refresh every 60s
-setInterval(loadConfig, 60000);
+document.getElementById('reload-all-btn').onclick=async()=>{
+  if(!confirm('All online players will reload in ~5 seconds. Confirm?')) return;
+  setStatus('loading','Sending reload signal...');
+  try{
+    const cur=document.getElementById('cfg-version').value.trim();
+    await sbSet('version',cur+'_reload');
+    setTimeout(async()=>{await sbSet('version',cur);setStatus('ok','Reload signal sent!');},6000);
+  } catch(e){setStatus('err','Error: '+e.message);}
+};
+
+setInterval(()=>{loadConfig();loadCodeUsage();},60000);
 </script>
 </body>
 </html>
