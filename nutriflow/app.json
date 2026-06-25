@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "NutriFlow",
+    "slug": "nutriflow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nutriflow.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "NutriFlow benötigt Zugriff auf die Kamera für den Barcode Scanner."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#4CAF50",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.nutriflow.app",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "locales": {
+      "de": "./src/i18n/de.json",
+      "en": "./src/i18n/en.json"
+    },
+    "plugins": []
+  }
+}
