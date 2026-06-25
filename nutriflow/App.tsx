@@ -4,25 +4,39 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useStore } from './src/store';
 import { useTheme, useIsDark } from './src/hooks/useTheme';
+import { useAuth } from './src/hooks/useAuth';
 import AppNavigator from './src/navigation/AppNavigator';
 import SetupScreen from './src/screens/SetupScreen';
+import AuthScreen from './src/screens/AuthScreen';
 
 function AppContent() {
   const theme = useTheme();
   const isDark = useIsDark();
+  const { user, loading: authLoading } = useAuth();
   const isLoading = useStore(s => s.isLoading);
   const profile = useStore(s => s.profile);
   const initialize = useStore(s => s.initialize);
 
   useEffect(() => {
-    initialize();
-  }, []);
+    if (!authLoading) {
+      initialize(user?.uid);
+    }
+  }, [authLoading, user?.uid]);
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <View style={[styles.loading, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.primary} />
       </View>
+    );
+  }
+
+  if (!user) {
+    return (
+      <>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.background} />
+        <AuthScreen />
+      </>
     );
   }
 

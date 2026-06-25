@@ -13,6 +13,7 @@
     "expo-haptics": "^56.0.3",
     "expo-linear-gradient": "^56.0.4",
     "expo-status-bar": "~56.0.4",
+    "firebase": "^12.15.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-native": "0.85.3",

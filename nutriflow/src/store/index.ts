@@ -15,6 +15,7 @@ import {
 import { calculateGoals, calculateDailyTotals, getTodayString } from '../utils/calculations';
 import { defaultFoods } from '../data/foods';
 import { setLanguage } from '../i18n';
+import { syncToFirestore, loadFromFirestore } from '../services/firestore';
 
 const STORAGE_KEYS = {
   PROFILE: 'nutriflow_profile',
@@ -32,6 +33,7 @@ const STORAGE_KEYS = {
 
 interface NutriFlowState {
   isLoading: boolean;
+  firebaseUid: string | null;
   profile: UserProfile | null;
   goals: NutritionGoals;
   meals: Record<string, MealEntry[]>;
@@ -45,7 +47,8 @@ interface NutriFlowState {
   settings: AppSettings;
   selectedDate: string;
 
-  initialize: () => Promise<void>;
+  initialize: (uid?: string) => Promise<void>;
+  setFirebaseUid: (uid: string | null) => void;
   setProfile: (profile: UserProfile) => Promise<void>;
   setGoals: (goals: NutritionGoals) => Promise<void>;
   addMeal: (foodItem: FoodItem, quantity: number, mealType: MealType) => Promise<void>;
@@ -56,6 +59,7 @@ interface NutriFlowState {
   addCustomFood: (food: Omit<FoodItem, 'id' | 'isFavorite'>) => Promise<void>;
   setSelectedDate: (date: string) => void;
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>;
+  resetStore: () => Promise<void>;
   getDailyMeals: (date?: string) => MealEntry[];
   getDailyWater: (date?: string) => number;
   getDailyTotals: (date?: string) => { calories: number; protein: number; carbs: number; fat: number; fiber: number };
@@ -91,8 +95,15 @@ const defaultSettings: AppSettings = {
   subscription: 'free',
 };
 
+function cloudSync(uid: string | null, data: Record<string, any>) {
+  if (uid) {
+    syncToFirestore(uid, data);
+  }
+}
+
 export const useStore = create<NutriFlowState>((set, get) => ({
   isLoading: true,
+  firebaseUid: null,
   profile: null,
   goals: defaultGoals,
   meals: {},
@@ -106,8 +117,11 @@ export const useStore = create<NutriFlowState>((set, get) => ({
   settings: defaultSettings,
   selectedDate: getTodayString(),
 
-  initialize: async () => {
+  setFirebaseUid: (uid: string | null) => set({ firebaseUid: uid }),
+
+  initialize: async (uid?: string) => {
     try {
+      // Load local data first
       const [profileStr, goalsStr, mealsStr, waterStr, weightsStr, recentStr, streakStr, badgesStr, settingsStr, customFoodsStr] =
         await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.PROFILE),
@@ -122,7 +136,68 @@ export const useStore = create<NutriFlowState>((set, get) => ({
           AsyncStorage.getItem(STORAGE_KEYS.FOODS),
         ]);
 
-      const settings = settingsStr ? JSON.parse(settingsStr) : defaultSettings;
+      let settings = settingsStr ? JSON.parse(settingsStr) : defaultSettings;
+      let profile = profileStr ? JSON.parse(profileStr) : null;
+      let goals = goalsStr ? JSON.parse(goalsStr) : defaultGoals;
+      let meals = mealsStr ? JSON.parse(mealsStr) : {};
+      let waterLog = waterStr ? JSON.parse(waterStr) : {};
+      let weights = weightsStr ? JSON.parse(weightsStr) : [];
+      let customFoods = customFoodsStr ? JSON.parse(customFoodsStr) : [];
+      let recentFoods = recentStr ? JSON.parse(recentStr) : [];
+      let streak = streakStr ? JSON.parse(streakStr) : { currentStreak: 0, longestStreak: 0, lastTrackedDate: '' };
+      let badges = badgesStr ? JSON.parse(badgesStr) : defaultBadges;
+
+      // If logged in, try to merge cloud data (cloud wins for non-local-only data)
+      if (uid) {
+        const cloudData = await loadFromFirestore(uid);
+        if (cloudData) {
+          if (cloudData.profile) profile = cloudData.profile;
+          if (cloudData.goals) goals = cloudData.goals;
+          if (cloudData.settings) settings = cloudData.settings;
+          if (cloudData.streak) streak = cloudData.streak;
+          if (cloudData.badges) badges = cloudData.badges;
+          if (cloudData.weights?.length) weights = cloudData.weights;
+          // Merge meals: keep both local and cloud entries
+          if (cloudData.meals) {
+            for (const [date, entries] of Object.entries(cloudData.meals)) {
+              const localEntries = meals[date] || [];
+              const localIds = new Set(localEntries.map((e: MealEntry) => e.id));
+              const newEntries = entries.filter((e: MealEntry) => !localIds.has(e.id));
+              meals[date] = [...localEntries, ...newEntries];
+            }
+          }
+          if (cloudData.waterLog) {
+            for (const [date, amount] of Object.entries(cloudData.waterLog)) {
+              waterLog[date] = Math.max(waterLog[date] || 0, amount as number);
+            }
+          }
+          if (cloudData.customFoods?.length) customFoods = cloudData.customFoods;
+          if (cloudData.recentFoods?.length) recentFoods = cloudData.recentFoods;
+
+          // Save merged data locally
+          await Promise.all([
+            AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile)),
+            AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(goals)),
+            AsyncStorage.setItem(STORAGE_KEYS.MEALS, JSON.stringify(meals)),
+            AsyncStorage.setItem(STORAGE_KEYS.WATER, JSON.stringify(waterLog)),
+            AsyncStorage.setItem(STORAGE_KEYS.WEIGHTS, JSON.stringify(weights)),
+            AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)),
+            AsyncStorage.setItem(STORAGE_KEYS.STREAK, JSON.stringify(streak)),
+            AsyncStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(badges)),
+            AsyncStorage.setItem(STORAGE_KEYS.FOODS, JSON.stringify(customFoods)),
+            AsyncStorage.setItem(STORAGE_KEYS.RECENT, JSON.stringify(recentFoods)),
+          ]);
+        } else if (profile?.setupComplete) {
+          // First login — push existing local data to cloud
+          const favoritesStr = await AsyncStorage.getItem(STORAGE_KEYS.FAVORITES);
+          const favoriteIds: string[] = favoritesStr ? JSON.parse(favoritesStr) : [];
+          syncToFirestore(uid, {
+            profile, goals, meals, waterLog, weights, customFoods,
+            recentFoods, favoriteIds, streak, badges, settings,
+          });
+        }
+      }
+
       setLanguage(settings.language || 'de');
 
       const favoritesStr = await AsyncStorage.getItem(STORAGE_KEYS.FAVORITES);
@@ -134,20 +209,21 @@ export const useStore = create<NutriFlowState>((set, get) => ({
 
       set({
         isLoading: false,
-        profile: profileStr ? JSON.parse(profileStr) : null,
-        goals: goalsStr ? JSON.parse(goalsStr) : defaultGoals,
-        meals: mealsStr ? JSON.parse(mealsStr) : {},
-        waterLog: waterStr ? JSON.parse(waterStr) : {},
-        weights: weightsStr ? JSON.parse(weightsStr) : [],
+        firebaseUid: uid || null,
+        profile,
+        goals,
+        meals,
+        waterLog,
+        weights,
         foods,
-        customFoods: customFoodsStr ? JSON.parse(customFoodsStr) : [],
-        recentFoods: recentStr ? JSON.parse(recentStr) : [],
-        streak: streakStr ? JSON.parse(streakStr) : { currentStreak: 0, longestStreak: 0, lastTrackedDate: '' },
-        badges: badgesStr ? JSON.parse(badgesStr) : defaultBadges,
+        customFoods,
+        recentFoods,
+        streak,
+        badges,
         settings,
       });
     } catch {
-      set({ isLoading: false });
+      set({ isLoading: false, firebaseUid: uid || null });
     }
   },
 
@@ -158,11 +234,13 @@ export const useStore = create<NutriFlowState>((set, get) => ({
       AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(goals)),
     ]);
     set({ profile, goals });
+    cloudSync(get().firebaseUid, { profile, goals });
   },
 
   setGoals: async (goals: NutritionGoals) => {
     await AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(goals));
     set({ goals });
+    cloudSync(get().firebaseUid, { goals });
   },
 
   addMeal: async (foodItem: FoodItem, quantity: number, mealType: MealType) => {
@@ -219,6 +297,10 @@ export const useStore = create<NutriFlowState>((set, get) => ({
     ]);
 
     set({ meals: updatedMeals, recentFoods: updatedRecent, streak: updatedStreak, badges: updatedBadges });
+    cloudSync(get().firebaseUid, {
+      meals: updatedMeals, recentFoods: updatedRecent,
+      streak: updatedStreak, badges: updatedBadges,
+    });
   },
 
   removeMeal: async (date: string, mealId: string) => {
@@ -227,6 +309,7 @@ export const useStore = create<NutriFlowState>((set, get) => ({
     const updatedMeals = { ...meals, [date]: dayMeals };
     await AsyncStorage.setItem(STORAGE_KEYS.MEALS, JSON.stringify(updatedMeals));
     set({ meals: updatedMeals });
+    cloudSync(get().firebaseUid, { meals: updatedMeals });
   },
 
   addWater: async (amount: number) => {
@@ -236,6 +319,7 @@ export const useStore = create<NutriFlowState>((set, get) => ({
     const updated = { ...waterLog, [today]: current + amount };
     await AsyncStorage.setItem(STORAGE_KEYS.WATER, JSON.stringify(updated));
     set({ waterLog: updated });
+    cloudSync(get().firebaseUid, { waterLog: updated });
   },
 
   addWeight: async (weight: number) => {
@@ -271,10 +355,12 @@ export const useStore = create<NutriFlowState>((set, get) => ({
       }
       await AsyncStorage.setItem(STORAGE_KEYS.BADGES, JSON.stringify(updatedBadges));
       set({ profile: updatedProfile, badges: updatedBadges });
+      cloudSync(get().firebaseUid, { profile: updatedProfile, badges: updatedBadges });
     }
 
     await AsyncStorage.setItem(STORAGE_KEYS.WEIGHTS, JSON.stringify(updatedWeights));
     set({ weights: updatedWeights });
+    cloudSync(get().firebaseUid, { weights: updatedWeights });
   },
 
   toggleFavorite: async (foodId: string) => {
@@ -287,6 +373,7 @@ export const useStore = create<NutriFlowState>((set, get) => ({
       AsyncStorage.setItem(STORAGE_KEYS.FOODS, JSON.stringify(updatedCustom)),
     ]);
     set({ foods: updatedFoods, customFoods: updatedCustom });
+    cloudSync(get().firebaseUid, { favoriteIds, customFoods: updatedCustom });
   },
 
   addCustomFood: async (food: Omit<FoodItem, 'id' | 'isFavorite'>) => {
@@ -295,6 +382,7 @@ export const useStore = create<NutriFlowState>((set, get) => ({
     const updated = [...customFoods, newFood];
     await AsyncStorage.setItem(STORAGE_KEYS.FOODS, JSON.stringify(updated));
     set({ customFoods: updated });
+    cloudSync(get().firebaseUid, { customFoods: updated });
   },
 
   setSelectedDate: (date: string) => set({ selectedDate: date }),
@@ -307,6 +395,27 @@ export const useStore = create<NutriFlowState>((set, get) => ({
     }
     await AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
     set({ settings: updated });
+    cloudSync(get().firebaseUid, { settings: updated });
+  },
+
+  resetStore: async () => {
+    await Promise.all(Object.values(STORAGE_KEYS).map(k => AsyncStorage.removeItem(k)));
+    set({
+      isLoading: false,
+      firebaseUid: null,
+      profile: null,
+      goals: defaultGoals,
+      meals: {},
+      waterLog: {},
+      weights: [],
+      foods: defaultFoods,
+      customFoods: [],
+      recentFoods: [],
+      streak: { currentStreak: 0, longestStreak: 0, lastTrackedDate: '' },
+      badges: defaultBadges,
+      settings: defaultSettings,
+      selectedDate: getTodayString(),
+    });
   },
 
   getDailyMeals: (date?: string) => {

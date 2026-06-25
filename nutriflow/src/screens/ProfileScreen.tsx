@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, Modal } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, Modal, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { signOut } from 'firebase/auth';
+import { auth } from '../config/firebase';
 import { useTheme, useIsDark } from '../hooks/useTheme';
 import { useStore } from '../store';
 import { t } from '../i18n';
@@ -24,6 +26,9 @@ export default function ProfileScreen() {
   const settings = useStore(s => s.settings);
   const updateSettings = useStore(s => s.updateSettings);
   const streak = useStore(s => s.streak);
+
+  const resetStore = useStore(s => s.resetStore);
+  const lang = settings.language;
 
   const [showEditGoals, setShowEditGoals] = useState(false);
   const [showSubscription, setShowSubscription] = useState(false);
@@ -248,6 +253,49 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <View style={styles.settingRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 16 }}>☁️</Text>
+              <View>
+                <Text style={[styles.settingLabel, { color: theme.text }]}>Cloud Sync</Text>
+                <Text style={[styles.settingDesc, { color: theme.primary }]}>
+                  {auth.currentUser?.email || ''}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.settingDesc, { color: theme.primary }]}>
+              {lang === 'de' ? 'Aktiv' : 'Active'} ✓
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.logoutBtn, { borderColor: theme.accent }]}
+          onPress={() => {
+            Alert.alert(
+              lang === 'de' ? 'Abmelden' : 'Logout',
+              lang === 'de' ? 'Möchtest du dich wirklich abmelden?' : 'Are you sure you want to logout?',
+              [
+                { text: lang === 'de' ? 'Abbrechen' : 'Cancel', style: 'cancel' },
+                {
+                  text: lang === 'de' ? 'Abmelden' : 'Logout',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await resetStore();
+                    await signOut(auth);
+                  },
+                },
+              ]
+            );
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.logoutText, { color: theme.accent }]}>
+            {lang === 'de' ? 'Abmelden' : 'Logout'}
+          </Text>
+        </TouchableOpacity>
+
         <View style={{ height: 100 }} />
       </ScrollView>
 
@@ -346,4 +394,15 @@ const styles = StyleSheet.create({
   },
   featureIcon: { fontSize: 24, width: 32, textAlign: 'center' },
   featureInfo: { flex: 1 },
+  logoutBtn: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1.5,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    marginTop: Spacing.md,
+  },
+  logoutText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semibold,
+  },
 });
