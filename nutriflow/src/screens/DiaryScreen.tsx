@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 import { useStore } from '../store';
 import { t } from '../i18n';
+import { calculateDailyTotals } from '../utils/calculations';
 import { MealType } from '../types';
 import MealCard from '../components/MealCard';
 import WaterCard from '../components/WaterCard';
@@ -20,7 +21,8 @@ export default function DiaryScreen() {
   const [showRecipes, setShowRecipes] = useState<MealType | null>(null);
   const selectedDate = useStore(s => s.selectedDate);
   const setSelectedDate = useStore(s => s.setSelectedDate);
-  const totals = useStore(s => s.getDailyTotals());
+  const meals = useStore(s => s.meals);
+  const totals = useMemo(() => calculateDailyTotals(meals[selectedDate] || []), [meals, selectedDate]);
   const goals = useStore(s => s.goals);
   const settings = useStore(s => s.settings);
 

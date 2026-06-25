@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../hooks/useTheme';
 import { useStore } from '../store';
 import { t } from '../i18n';
+import { calculateDailyTotals } from '../utils/calculations';
 import ProgressRing from '../components/ProgressRing';
 import ProgressBar from '../components/ProgressBar';
 import WaterCard from '../components/WaterCard';
@@ -13,10 +14,14 @@ export default function DashboardScreen() {
   const theme = useTheme();
   const navigation = useNavigation<any>();
   const goals = useStore(s => s.goals);
-  const totals = useStore(s => s.getDailyTotals());
+  const selectedDate = useStore(s => s.selectedDate);
+  const meals = useStore(s => s.meals);
+  const waterLog = useStore(s => s.waterLog);
   const profile = useStore(s => s.profile);
-  const dailyWater = useStore(s => s.getDailyWater());
   const streak = useStore(s => s.streak);
+
+  const totals = useMemo(() => calculateDailyTotals(meals[selectedDate] || []), [meals, selectedDate]);
+  const dailyWater = waterLog[selectedDate] || 0;
 
   const remaining = Math.max(goals.calories - totals.calories, 0);
   const calorieProgress = goals.calories > 0 ? totals.calories / goals.calories : 0;

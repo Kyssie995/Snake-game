@@ -7,7 +7,9 @@ import { BorderRadius, FontSize, FontWeight, Spacing } from '../constants/theme'
 
 export default function WaterCard() {
   const theme = useTheme();
-  const water = useStore(s => s.getDailyWater());
+  const selectedDate = useStore(s => s.selectedDate);
+  const waterLog = useStore(s => s.waterLog);
+  const water = waterLog[selectedDate] || 0;
   const waterGoal = useStore(s => s.goals.water);
   const addWater = useStore(s => s.addWater);
 

@@ -21,9 +21,10 @@ const mealIcons: Record<MealType, string> = {
 
 export default function MealCard({ mealType, onAdd }: Props) {
   const theme = useTheme();
-  const dailyMeals = useStore(s => s.getDailyMeals());
-  const removeMeal = useStore(s => s.removeMeal);
   const selectedDate = useStore(s => s.selectedDate);
+  const allMeals = useStore(s => s.meals);
+  const removeMeal = useStore(s => s.removeMeal);
+  const dailyMeals = allMeals[selectedDate] || [];
   const meals = dailyMeals.filter(m => m.mealType === mealType);
 
   const totalCals = meals.reduce((sum, m) => {

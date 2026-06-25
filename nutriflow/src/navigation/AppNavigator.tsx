@@ -8,10 +8,7 @@ import DiaryScreen from '../screens/DiaryScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import StatsScreen from '../screens/StatsScreen';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { FontSize, FontWeight } from '../constants/theme';
-
-const Stack = createNativeStackNavigator();
 
 const Tab = createBottomTabNavigator();
 
