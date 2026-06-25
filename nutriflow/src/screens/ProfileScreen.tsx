@@ -1,18 +1,25 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, Modal } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme, useIsDark } from '../hooks/useTheme';
 import { useStore } from '../store';
 import { t } from '../i18n';
 import { BorderRadius, FontSize, FontWeight, Spacing } from '../constants/theme';
+import EditGoalsScreen from './EditGoalsScreen';
+import SubscriptionScreen from './SubscriptionScreen';
 
 export default function ProfileScreen() {
   const theme = useTheme();
   const isDark = useIsDark();
+  const navigation = useNavigation<any>();
   const profile = useStore(s => s.profile);
   const goals = useStore(s => s.goals);
   const settings = useStore(s => s.settings);
   const updateSettings = useStore(s => s.updateSettings);
   const streak = useStore(s => s.streak);
+
+  const [showEditGoals, setShowEditGoals] = useState(false);
+  const [showSubscription, setShowSubscription] = useState(false);
 
   const toggleTheme = () => {
     updateSettings({ theme: isDark ? 'light' : 'dark' });
@@ -30,141 +37,162 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={[styles.title, { color: theme.text }]}>{t('profile.title')}</Text>
+    <>
+      <ScrollView
+        style={[styles.container, { backgroundColor: theme.background }]}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.title, { color: theme.text }]}>{t('profile.title')}</Text>
 
-      <View style={[styles.profileCard, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
-        <View style={[styles.avatar, { backgroundColor: theme.primary + '20' }]}>
-          <Text style={[styles.avatarText, { color: theme.primary }]}>
-            {(profile?.name || 'N')[0].toUpperCase()}
-          </Text>
-        </View>
-        <Text style={[styles.profileName, { color: theme.text }]}>{profile?.name || 'NutriFlow'}</Text>
-        <View style={[styles.tierBadge, { backgroundColor: theme.primary + '15' }]}>
-          <Text style={[styles.tierText, { color: theme.primary }]}>
-            {tierLabels[settings.subscription]}
-          </Text>
-        </View>
-
-        <View style={styles.profileStats}>
-          <View style={styles.profileStat}>
-            <Text style={[styles.profileStatValue, { color: theme.text }]}>{streak.currentStreak}</Text>
-            <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>Streak</Text>
-          </View>
-          <View style={[styles.profileStatDivider, { backgroundColor: theme.border }]} />
-          <View style={styles.profileStat}>
-            <Text style={[styles.profileStatValue, { color: theme.text }]}>{profile?.currentWeight || '—'}</Text>
-            <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>kg</Text>
-          </View>
-          <View style={[styles.profileStatDivider, { backgroundColor: theme.border }]} />
-          <View style={styles.profileStat}>
-            <Text style={[styles.profileStatValue, { color: theme.text }]}>{goals.calories}</Text>
-            <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>kcal</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
-        <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.goals')}</Text>
-
-        <View style={styles.goalRow}>
-          <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.calories')}</Text>
-          <Text style={[styles.goalValue, { color: theme.text }]}>{goals.calories} kcal</Text>
-        </View>
-        <View style={styles.goalRow}>
-          <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.protein')}</Text>
-          <Text style={[styles.goalValue, { color: theme.protein }]}>{goals.protein}g</Text>
-        </View>
-        <View style={styles.goalRow}>
-          <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.carbs')}</Text>
-          <Text style={[styles.goalValue, { color: theme.carbs }]}>{goals.carbs}g</Text>
-        </View>
-        <View style={styles.goalRow}>
-          <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.fat')}</Text>
-          <Text style={[styles.goalValue, { color: theme.fat }]}>{goals.fat}g</Text>
-        </View>
-        <View style={styles.goalRow}>
-          <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.water')}</Text>
-          <Text style={[styles.goalValue, { color: theme.water }]}>{goals.water}L</Text>
-        </View>
-      </View>
-
-      <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
-        <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.settings')}</Text>
-
-        <View style={styles.settingRow}>
-          <View>
-            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.theme')}</Text>
-            <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
-              {isDark ? t('profile.darkMode') : t('profile.lightMode')}
+        <View style={[styles.profileCard, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <View style={[styles.avatar, { backgroundColor: theme.primary + '20' }]}>
+            <Text style={[styles.avatarText, { color: theme.primary }]}>
+              {(profile?.name || 'N')[0].toUpperCase()}
             </Text>
           </View>
-          <Switch
-            value={isDark}
-            onValueChange={toggleTheme}
-            trackColor={{ false: theme.surfaceSecondary, true: theme.primary + '50' }}
-            thumbColor={isDark ? theme.primary : theme.textTertiary}
-          />
-        </View>
-
-        <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
-
-        <TouchableOpacity style={styles.settingRow} onPress={toggleLanguage}>
-          <View>
-            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.language')}</Text>
-            <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
-              {settings.language === 'de' ? 'Deutsch' : 'English'}
-            </Text>
-          </View>
-          <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
-        </TouchableOpacity>
-
-        <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
-
-        <TouchableOpacity style={styles.settingRow}>
-          <View>
-            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.subscription')}</Text>
-            <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+          <Text style={[styles.profileName, { color: theme.text }]}>{profile?.name || 'NutriFlow'}</Text>
+          <TouchableOpacity
+            style={[styles.tierBadge, { backgroundColor: theme.primary + '15' }]}
+            onPress={() => setShowSubscription(true)}
+          >
+            <Text style={[styles.tierText, { color: theme.primary }]}>
               {tierLabels[settings.subscription]}
             </Text>
+          </TouchableOpacity>
+
+          <View style={styles.profileStats}>
+            <View style={styles.profileStat}>
+              <Text style={[styles.profileStatValue, { color: theme.text }]}>{streak.currentStreak}</Text>
+              <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>Streak</Text>
+            </View>
+            <View style={[styles.profileStatDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.profileStat}>
+              <Text style={[styles.profileStatValue, { color: theme.text }]}>{profile?.currentWeight || '—'}</Text>
+              <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>kg</Text>
+            </View>
+            <View style={[styles.profileStatDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.profileStat}>
+              <Text style={[styles.profileStatValue, { color: theme.text }]}>{goals.calories}</Text>
+              <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>kcal</Text>
+            </View>
           </View>
-          <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
-        </TouchableOpacity>
-      </View>
+        </View>
 
-      <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
-        <TouchableOpacity style={styles.settingRow}>
-          <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.mealCategories')}</Text>
-          <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
-        </TouchableOpacity>
-        <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
-        <TouchableOpacity style={styles.settingRow}>
-          <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.export')}</Text>
-          <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
-        </TouchableOpacity>
-        <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
-        <TouchableOpacity style={styles.settingRow}>
-          <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.privacy')}</Text>
-          <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
-        <TouchableOpacity style={styles.settingRow}>
-          <View>
-            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.about')}</Text>
-            <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>NutriFlow v1.0.0</Text>
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.goals')}</Text>
+            <TouchableOpacity onPress={() => setShowEditGoals(true)}>
+              <Text style={[styles.editBtn, { color: theme.primary }]}>{t('common.edit')}</Text>
+            </TouchableOpacity>
           </View>
-          <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
-        </TouchableOpacity>
-      </View>
 
-      <View style={{ height: 100 }} />
-    </ScrollView>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.calories')}</Text>
+            <Text style={[styles.goalValue, { color: theme.text }]}>{goals.calories} kcal</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.protein')}</Text>
+            <Text style={[styles.goalValue, { color: theme.protein }]}>{goals.protein}g</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.carbs')}</Text>
+            <Text style={[styles.goalValue, { color: theme.carbs }]}>{goals.carbs}g</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.fat')}</Text>
+            <Text style={[styles.goalValue, { color: theme.fat }]}>{goals.fat}g</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.water')}</Text>
+            <Text style={[styles.goalValue, { color: theme.water }]}>{goals.water}L</Text>
+          </View>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.settings')}</Text>
+
+          <View style={styles.settingRow}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.theme')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {isDark ? t('profile.darkMode') : t('profile.lightMode')}
+              </Text>
+            </View>
+            <Switch
+              value={isDark}
+              onValueChange={toggleTheme}
+              trackColor={{ false: theme.surfaceSecondary, true: theme.primary + '50' }}
+              thumbColor={isDark ? theme.primary : theme.textTertiary}
+            />
+          </View>
+
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.settingRow} onPress={toggleLanguage}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.language')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {settings.language === 'de' ? 'Deutsch' : 'English'}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowSubscription(true)}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.subscription')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {tierLabels[settings.subscription]}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => navigation.navigate('Stats')}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('stats.title')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.settingRow}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.mealCategories')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.settingRow}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.export')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.settingRow}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.privacy')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <TouchableOpacity style={styles.settingRow}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.about')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>NutriFlow v1.0.0</Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ height: 100 }} />
+      </ScrollView>
+
+      <EditGoalsScreen visible={showEditGoals} onClose={() => setShowEditGoals(false)} />
+
+      <Modal visible={showSubscription} animationType="slide" presentationStyle="pageSheet">
+        <SubscriptionScreen onClose={() => setShowSubscription(false)} />
+      </Modal>
+    </>
   );
 }
 
@@ -213,7 +241,14 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
   sectionTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.semibold, marginBottom: Spacing.lg },
+  editBtn: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
   goalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

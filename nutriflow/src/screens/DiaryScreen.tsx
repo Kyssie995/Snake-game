@@ -5,7 +5,10 @@ import { useStore } from '../store';
 import { t } from '../i18n';
 import { MealType } from '../types';
 import MealCard from '../components/MealCard';
+import WaterCard from '../components/WaterCard';
 import AddFoodScreen from './AddFoodScreen';
+import CreateFoodScreen from './CreateFoodScreen';
+import RecipesScreen from './RecipesScreen';
 import { BorderRadius, FontSize, FontWeight, Spacing } from '../constants/theme';
 import { format, addDays, subDays } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -13,6 +16,8 @@ import { de, enUS } from 'date-fns/locale';
 export default function DiaryScreen() {
   const theme = useTheme();
   const [addFoodModal, setAddFoodModal] = useState<MealType | null>(null);
+  const [showCreateFood, setShowCreateFood] = useState(false);
+  const [showRecipes, setShowRecipes] = useState<MealType | null>(null);
   const selectedDate = useStore(s => s.selectedDate);
   const setSelectedDate = useStore(s => s.setSelectedDate);
   const totals = useStore(s => s.getDailyTotals());
@@ -96,6 +101,30 @@ export default function DiaryScreen() {
             onAdd={() => setAddFoodModal(type)}
           />
         ))}
+
+        <WaterCard />
+
+        <View style={styles.quickActions}>
+          <TouchableOpacity
+            style={[styles.quickAction, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}
+            onPress={() => setShowCreateFood(true)}
+          >
+            <Text style={styles.quickActionIcon}>✏️</Text>
+            <Text style={[styles.quickActionText, { color: theme.text }]}>
+              {settings.language === 'de' ? 'Eigenes Essen' : 'Custom Food'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.quickAction, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}
+            onPress={() => setShowRecipes('breakfast')}
+          >
+            <Text style={styles.quickActionIcon}>🍳</Text>
+            <Text style={[styles.quickActionText, { color: theme.text }]}>
+              {t('meals.recipes')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={{ height: 100 }} />
       </ScrollView>
 
@@ -104,6 +133,16 @@ export default function DiaryScreen() {
           visible
           mealType={addFoodModal}
           onClose={() => setAddFoodModal(null)}
+        />
+      )}
+
+      <CreateFoodScreen visible={showCreateFood} onClose={() => setShowCreateFood(false)} />
+
+      {showRecipes && (
+        <RecipesScreen
+          visible
+          mealType={showRecipes}
+          onClose={() => setShowRecipes(null)}
         />
       )}
     </View>
@@ -170,4 +209,24 @@ const styles = StyleSheet.create({
   content: {
     padding: Spacing.lg,
   },
+  quickActions: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  quickAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  quickActionIcon: { fontSize: 18 },
+  quickActionText: { fontSize: FontSize.sm, fontWeight: FontWeight.medium },
 });

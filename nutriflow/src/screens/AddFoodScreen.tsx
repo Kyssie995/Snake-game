@@ -15,6 +15,7 @@ import { t } from '../i18n';
 import { FoodItem, MealType } from '../types';
 import { calculateMealNutrition } from '../utils/calculations';
 import { BorderRadius, FontSize, FontWeight, Spacing } from '../constants/theme';
+import BarcodeScannerScreen from './BarcodeScannerScreen';
 
 interface Props {
   visible: boolean;
@@ -30,6 +31,7 @@ export default function AddFoodScreen({ visible, mealType, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('search');
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
   const [quantity, setQuantity] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
 
   const foods = useStore(s => s.foods);
   const customFoods = useStore(s => s.customFoods);
@@ -124,7 +126,9 @@ export default function AddFoodScreen({ visible, mealType, onClose }: Props) {
           <Text style={[styles.headerTitle, { color: theme.text }]}>
             {t(`meals.${mealType}`)}
           </Text>
-          <View style={{ width: 60 }} />
+          <TouchableOpacity onPress={() => setShowScanner(true)} style={{ width: 60, alignItems: 'flex-end' }}>
+            <Text style={{ fontSize: 22 }}>📷</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={[styles.searchBar, { backgroundColor: theme.surfaceSecondary }]}>
@@ -215,6 +219,21 @@ export default function AddFoodScreen({ visible, mealType, onClose }: Props) {
           </View>
         )}
       </View>
+
+      <BarcodeScannerScreen
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onBarcodeScanned={(barcode) => {
+          const found = allFoods.find(f => f.barcode === barcode);
+          if (found) {
+            setSelectedFood(found);
+            setQuantity(String(found.servingSize));
+          } else {
+            setQuery(barcode);
+            setActiveTab('search');
+          }
+        }}
+      />
     </Modal>
   );
 }

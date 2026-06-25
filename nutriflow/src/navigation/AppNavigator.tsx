@@ -7,7 +7,11 @@ import DashboardScreen from '../screens/DashboardScreen';
 import DiaryScreen from '../screens/DiaryScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import StatsScreen from '../screens/StatsScreen';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { FontSize, FontWeight } from '../constants/theme';
+
+const Stack = createNativeStackNavigator();
 
 const Tab = createBottomTabNavigator();
 
@@ -65,6 +69,14 @@ export default function AppNavigator() {
         options={{
           tabBarLabel: t('tabs.progress'),
           tabBarIcon: ({ focused, color }) => <TabIcon icon="📈" focused={focused} color={color} />,
+        }}
+      />
+      <Tab.Screen
+        name="Stats"
+        component={StatsScreen}
+        options={{
+          tabBarButton: () => null,
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tab.Screen
