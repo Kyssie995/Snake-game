@@ -12,6 +12,8 @@ import ShoppingListScreen from './ShoppingListScreen';
 import ChallengesScreen from './ChallengesScreen';
 import DataExportScreen from './DataExportScreen';
 import HealthIntegrationsScreen from './HealthIntegrationsScreen';
+import PrivacyScreen from './PrivacyScreen';
+import AboutScreen from './AboutScreen';
 
 export default function ProfileScreen() {
   const theme = useTheme();
@@ -30,6 +32,8 @@ export default function ProfileScreen() {
   const [showChallenges, setShowChallenges] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
 
   const toggleTheme = () => {
     updateSettings({ theme: isDark ? 'light' : 'dark' });
@@ -228,14 +232,14 @@ export default function ProfileScreen() {
             <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
           </TouchableOpacity>
           <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
-          <TouchableOpacity style={styles.settingRow}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowPrivacy(true)}>
             <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.privacy')}</Text>
             <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
           </TouchableOpacity>
         </View>
 
         <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
-          <TouchableOpacity style={styles.settingRow}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowAbout(true)}>
             <View>
               <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.about')}</Text>
               <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>NutriFlow v1.0.0</Text>
@@ -258,6 +262,8 @@ export default function ProfileScreen() {
       <ChallengesScreen visible={showChallenges} onClose={() => setShowChallenges(false)} />
       <DataExportScreen visible={showExport} onClose={() => setShowExport(false)} />
       <HealthIntegrationsScreen visible={showHealth} onClose={() => setShowHealth(false)} />
+      <PrivacyScreen visible={showPrivacy} onClose={() => setShowPrivacy(false)} />
+      <AboutScreen visible={showAbout} onClose={() => setShowAbout(false)} />
     </>
   );
 }
