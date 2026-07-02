@@ -1,0 +1,31 @@
+{
+  "name": "SoulboundBattlegrounds",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Modules": {
+        "$path": "src/ReplicatedStorage/Modules"
+      },
+      "Assets": { "$className": "Folder" },
+      "VFX": { "$className": "Folder" },
+      "Animations": { "$className": "Folder" }
+    },
+    "ServerScriptService": {
+      "Main": { "$path": "src/ServerScriptService/Main.server.lua" },
+      "Services": { "$path": "src/ServerScriptService/Services" },
+      "Abilities": { "$path": "src/ServerScriptService/Abilities" }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "ClientMain": { "$path": "src/StarterPlayer/StarterPlayerScripts/ClientMain.client.lua" },
+        "Controllers": { "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers" }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$ignoreUnknownInstances": true
+    }
+  }
+}
