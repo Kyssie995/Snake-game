@@ -1,0 +1,1574 @@
+<roblox xmlns:xmime="http://schemas.microsoft.com/appx/2010/manifest" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<Item class="ReplicatedStorage" referent="RBX1">
+		<Properties>
+			<string name="Name">ReplicatedStorage</string>
+		</Properties>
+		<Item class="Folder" referent="RBX2">
+			<Properties>
+				<string name="Name">Modules</string>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX3">
+				<Properties>
+					<string name="Name">CartoonBurst</string>
+					<ProtectedString name="Source">--[[
+	CartoonBurst.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:  ReplicatedStorage &gt; Modules &gt; CartoonBurst (ModuleScript)
+
+	The reusable cartoon death / reset animation.  100% stylized and
+	non-realistic: the character shakes, puffs up, red PAINT-style
+	splats pop out, then the whole thing bursts into comic chunks,
+	stars and smoke.  No gore, no body detail — just paint.
+
+	This module is SERVER-SIDE (spawned parts replicate to everyone).
+	Camera shake + local boom are handled by the client script
+	(DeathEffectsClient) via the PlayDeathFX RemoteEvent.
+
+	REUSING IT IN OTHER MAPS:
+		local CartoonBurst = require(ReplicatedStorage.Modules.CartoonBurst)
+		CartoonBurst.Play(character)              -- fire and forget
+		CartoonBurst.Play(character, function()   -- or with a callback
+			-- runs when the burst finishes (respawn the player here)
+		end)
+
+	It only needs ObbyConfig next to it and a RemoteEvent named
+	"PlayDeathFX" inside ReplicatedStorage.Remotes (created for you by
+	DeathHandler.server.lua).
+
+	CUSTOM SPLAT MESHPARTS (optional, recommended):
+	Put your own stylized MeshParts in a folder:
+		ReplicatedStorage &gt; Assets &gt; SplatMeshes
+	Any MeshParts found there are cloned at random for the splats and
+	chunks.  If the folder is missing, the module auto-builds simple
+	ball/disc parts so everything still works out of the box.
+	See the README for how to set up the MeshParts.
+--------------------------------------------------------------------]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
+local Debris            = game:GetService("Debris")
+
+local Config = require(script.Parent:WaitForChild("ObbyConfig"))
+local D      = Config.Death
+local C      = Config.Colors
+
+local CartoonBurst = {}
+
+--------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------
+
+local rng = Random.new()
+
+-- One shared folder in Workspace so debris stays tidy
+local function getEffectsFolder()
+	local folder = workspace:FindFirstChild("CartoonBurstFX")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "CartoonBurstFX"
+		folder.Parent = workspace
+	end
+	return folder
+end
+
+local function playSound(soundId, parent, volume, pitch)
+	if soundId == nil or soundId == "" then return end
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = volume or 1
+	sound.PlaybackSpeed = pitch or 1
+	sound.Parent = parent
+	sound:Play()
+	Debris:AddItem(sound, 4)
+end
+
+-- Grabs a random custom splat MeshPart if the user made an Assets
+-- folder, otherwise builds a stylized ball so the system works
+-- without any manual asset setup.
+local function makeSplatPart(size)
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local meshFolder = assets and assets:FindFirstChild("SplatMeshes")
+
+	local part
+	if meshFolder and #meshFolder:GetChildren() &gt; 0 then
+		local meshes = meshFolder:GetChildren()
+		part = meshes[rng:NextInteger(1, #meshes)]:Clone()
+		part.Size = size
+	else
+		part = Instance.new("Part")
+		part.Shape = Enum.PartType.Ball
+		part.Size = size
+	end
+
+	part.Material = Enum.Material.SmoothPlastic
+	part.Color = rng:NextNumber() &gt; 0.4 and C.SplatRed or C.SplatRed2
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	return part
+end
+
+-- Flat comic "paint puddle" left on the ground
+local function makeGroundSplat(position)
+	local splat = Instance.new("Part")
+	splat.Shape = Enum.PartType.Cylinder
+	splat.Material = Enum.Material.SmoothPlastic
+	splat.Color = C.SplatRed
+	splat.Size = Vector3.new(0.2, 0.5, 0.5)
+	splat.CanCollide = false
+	splat.CanQuery = false
+	splat.Anchored = true
+	-- Cylinders lie on their X axis, so roll 90 degrees to face up
+	splat.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+	return splat
+end
+
+-- Comic-book white "poof" star (built from crossed neon wedges)
+local function makePoofStar(position)
+	local star = Instance.new("Part")
+	star.Shape = Enum.PartType.Ball
+	star.Material = Enum.Material.Neon
+	star.Color = C.PoofWhite
+	star.Size = Vector3.new(1.2, 1.2, 1.2)
+	star.Anchored = true
+	star.CanCollide = false
+	star.CanQuery = false
+	star.CFrame = CFrame.new(position)
+	return star
+end
+
+-- Grey cartoon smoke burst
+local function attachSmoke(part)
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	smoke.Color = ColorSequence.new(Color3.fromRGB(180, 180, 180), Color3.fromRGB(90, 90, 90))
+	smoke.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 2),
+		NumberSequenceKeypoint.new(1, 6),
+	})
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	smoke.Lifetime = NumberRange.new(0.8, 1.6)
+	smoke.Speed = NumberRange.new(4, 9)
+	smoke.SpreadAngle = Vector2.new(180, 180)
+	smoke.Rate = 0
+	smoke.Parent = part
+	return smoke
+end
+
+-- Red confetti-ish paint particles
+local function attachRedBurstParticles(part)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(C.SplatRed, C.SplatRed2)
+	emitter.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.2),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	emitter.Lifetime = NumberRange.new(0.5, 1.1)
+	emitter.Speed = NumberRange.new(10, 22)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Acceleration = Vector3.new(0, -30, 0)
+	emitter.Rate = 0
+	emitter.Parent = part
+	return emitter
+end
+
+--------------------------------------------------------------------
+-- Animation phases
+--------------------------------------------------------------------
+
+-- (1) Freeze the character in place
+local function freeze(character)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if humanoid then
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid.JumpHeight = 0
+		humanoid.AutoRotate = false
+	end
+	if root then
+		root.Anchored = true
+	end
+end
+
+-- (2) Pressure build-up: shake harder and harder + puff up (R15)
+local function shake(character)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not root then return end
+
+	-- Puff the character up like an over-inflated balloon (R15 only;
+	-- R6 has no scale values, the shake alone still sells the gag)
+	if humanoid then
+		for _, scaleName in ipairs({ "BodyWidthScale", "BodyDepthScale", "BodyHeightScale", "HeadScale" }) do
+			local scaleValue = humanoid:FindFirstChild(scaleName)
+			if scaleValue and scaleValue:IsA("NumberValue") then
+				TweenService:Create(scaleValue, TweenInfo.new(
+					D.ShakeTime, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out
+				), { Value = scaleValue.Value * D.InflateScale }):Play()
+			end
+		end
+	end
+
+	playSound(Config.Sounds.Pop, root, 0.8, 0.6)
+
+	local baseCFrame = root.CFrame
+	local elapsed = 0
+	while elapsed &lt; D.ShakeTime do
+		local dt = RunService.Heartbeat:Wait()
+		elapsed += dt
+		local intensity = (elapsed / D.ShakeTime) * D.ShakeIntensity
+		root.CFrame = baseCFrame
+			* CFrame.new(
+				rng:NextNumber(-intensity, intensity),
+				rng:NextNumber(-intensity, intensity) * 0.5,
+				rng:NextNumber(-intensity, intensity))
+			* CFrame.Angles(
+				math.rad(rng:NextNumber(-8, 8) * intensity),
+				math.rad(rng:NextNumber(-8, 8) * intensity),
+				math.rad(rng:NextNumber(-8, 8) * intensity))
+	end
+	root.CFrame = baseCFrame
+end
+
+-- (3) Red splats pop out around the character during the build-up
+local function popSplats(character, effectsFolder)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local origin = root.Position
+
+	for i = 1, D.SplatCount do
+		task.delay((i - 1) * (D.ShakeTime * 0.7 / D.SplatCount), function()
+			local size = rng:NextNumber(0.6, 1.4)
+			local splat = makeSplatPart(Vector3.new(size, size, size))
+			splat.Anchored = true
+
+			local angle = rng:NextNumber(0, math.pi * 2)
+			local dist = rng:NextNumber(2.5, 4.5)
+			local target = origin + Vector3.new(
+				math.cos(angle) * dist,
+				rng:NextNumber(-1, 3),
+				math.sin(angle) * dist)
+
+			splat.CFrame = CFrame.new(origin)
+			splat.Parent = effectsFolder
+
+			-- Pop outward with a bouncy tween, then shrink away
+			TweenService:Create(splat, TweenInfo.new(
+				0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out
+			), { CFrame = CFrame.new(target) * CFrame.Angles(rng:NextNumber(0, 6), rng:NextNumber(0, 6), 0) }):Play()
+
+			task.delay(0.6, function()
+				TweenService:Create(splat, TweenInfo.new(0.4), {
+					Size = Vector3.zero,
+					Transparency = 1,
+				}):Play()
+			end)
+			Debris:AddItem(splat, 1.2)
+			playSound(Config.Sounds.Splat, splat, 0.5, rng:NextNumber(0.9, 1.4))
+		end)
+	end
+end
+
+-- (4)+(5) The BOOM: hide the character, throw stylized chunks,
+-- stars, smoke, particles, ground paint, and fire the client FX remote
+local function burst(character, effectsFolder)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local origin = root.Position
+
+	-- Invisible anchored emitter part at the burst point
+	local fxPart = Instance.new("Part")
+	fxPart.Size = Vector3.new(1, 1, 1)
+	fxPart.Transparency = 1
+	fxPart.Anchored = true
+	fxPart.CanCollide = false
+	fxPart.CanQuery = false
+	fxPart.CFrame = CFrame.new(origin)
+	local smoke = attachSmoke(fxPart)
+	local redFX = attachRedBurstParticles(fxPart)
+	fxPart.Parent = effectsFolder
+
+	-- Vanish the character instantly (cartoon "gone in a puff")
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Transparency = 1
+			descendant.CanCollide = false
+		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+			descendant.Transparency = 1
+		elseif descendant:IsA("ParticleEmitter") then
+			descendant.Enabled = false
+		end
+	end
+
+	-- BOOM assets
+	smoke:Emit(30)
+	redFX:Emit(60)
+	playSound(Config.Sounds.Boom, fxPart, 1, 1)
+	playSound(Config.Sounds.Splat, fxPart, 1, 0.55) -- low-pitched splat doubles as a boom layer
+
+	-- Tell every client to shake their camera / flash the screen
+	local remotes = ReplicatedStorage:FindFirstChild(Config.Remotes.Folder)
+	local playFX = remotes and remotes:FindFirstChild(Config.Remotes.PlayDeathFX)
+	if playFX then
+		playFX:FireAllClients(origin)
+	end
+
+	-- Flying red chunks (physics-driven, non-collidable with players)
+	for _ = 1, D.ChunkCount do
+		local size = rng:NextNumber(0.5, 1.3)
+		local chunk = makeSplatPart(Vector3.new(size, size, size))
+		chunk.Anchored = false
+		chunk.CanCollide = true
+		chunk.CollisionGroup = "CartoonDebris" -- registered by DeathHandler
+		chunk.CFrame = CFrame.new(origin + Vector3.new(
+			rng:NextNumber(-1, 1), rng:NextNumber(-0.5, 1.5), rng:NextNumber(-1, 1)))
+		chunk.AssemblyLinearVelocity = Vector3.new(
+			rng:NextNumber(-28, 28),
+			rng:NextNumber(18, 42),
+			rng:NextNumber(-28, 28))
+		chunk.AssemblyAngularVelocity = Vector3.new(
+			rng:NextNumber(-20, 20), rng:NextNumber(-20, 20), rng:NextNumber(-20, 20))
+		chunk.Parent = effectsFolder
+
+		task.delay(D.EffectLifetime - 0.5, function()
+			TweenService:Create(chunk, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+		end)
+		Debris:AddItem(chunk, D.EffectLifetime)
+	end
+
+	-- White comic stars that flash and expand
+	for _ = 1, D.StarCount do
+		local star = makePoofStar(origin + Vector3.new(
+			rng:NextNumber(-3, 3), rng:NextNumber(-1, 3), rng:NextNumber(-3, 3)))
+		star.Parent = effectsFolder
+		TweenService:Create(star, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = Vector3.new(4, 4, 4),
+			Transparency = 1,
+		}):Play()
+		Debris:AddItem(star, 0.6)
+	end
+
+	-- Paint puddles on the ground below the burst
+	for _ = 1, D.GroundSplatCount do
+		local rayOrigin = origin + Vector3.new(rng:NextNumber(-4, 4), 2, rng:NextNumber(-4, 4))
+		local result = workspace:Raycast(rayOrigin, Vector3.new(0, -20, 0))
+		if result then
+			local puddle = makeGroundSplat(result.Position + Vector3.new(0, 0.1, 0))
+			puddle.Parent = effectsFolder
+			local width = rng:NextNumber(2.5, 5)
+			TweenService:Create(puddle, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.2, width, width),
+			}):Play()
+			task.delay(D.EffectLifetime - 0.6, function()
+				TweenService:Create(puddle, TweenInfo.new(0.5), {
+					Size = Vector3.new(0.2, 0.4, 0.4),
+					Transparency = 1,
+				}):Play()
+			end)
+			Debris:AddItem(puddle, D.EffectLifetime)
+		end
+	end
+
+	Debris:AddItem(fxPart, D.EffectLifetime)
+end
+
+--------------------------------------------------------------------
+-- Public API
+--------------------------------------------------------------------
+
+--[[
+	CartoonBurst.Play(character, onFinished?)
+	Runs the whole sequence: freeze -&gt; shake+splats -&gt; BOOM -&gt; callback.
+	Yields nothing to the caller; the callback fires after
+	Config.Death.RespawnDelay so you can respawn the player from it.
+]]
+function CartoonBurst.Play(character, onFinished)
+	assert(character and character:FindFirstChild("HumanoidRootPart"),
+		"CartoonBurst.Play needs a character with a HumanoidRootPart")
+
+	task.spawn(function()
+		local effectsFolder = getEffectsFolder()
+
+		freeze(character)                     -- (1)
+		task.wait(D.FreezeTime)
+
+		popSplats(character, effectsFolder)   -- (3) runs during the shake
+		shake(character)                      -- (2) yields for ShakeTime
+
+		burst(character, effectsFolder)       -- (4)+(5)
+
+		task.wait(D.RespawnDelay)             -- (6) handled by caller
+		if onFinished then
+			onFinished()
+		end
+	end)
+end
+
+return CartoonBurst
+</ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX4">
+				<Properties>
+					<string name="Name">ObbyConfig</string>
+					<ProtectedString name="Source">--[[
+	ObbyConfig.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:  ReplicatedStorage &gt; Modules &gt; ObbyConfig (ModuleScript)
+
+	One central place for every tunable number, colour and sound ID used
+	by the Volcanic Arena Obby.  Both the server and the client read
+	from this module, so keep it in ReplicatedStorage.
+
+	SOUND IDS:
+	Roblox audio permissions mean marketplace sounds only play if your
+	experience owns them (or they are Roblox-created "Creator Store"
+	audio).  The rbxasset:// entries below are built into every Roblox
+	install and always work.  For the big boom / ambience, search the
+	Creator Store (Toolbox &gt; Audio &gt; filter "Roblox created") for
+	"cartoon explosion" / "volcano rumble" and paste the IDs here.
+--------------------------------------------------------------------]]
+
+local ObbyConfig = {}
+
+-------------------------------------------------- MAP -----------------
+ObbyConfig.Map = {
+	LavaHeight        = -24,     -- Y position of the lava ocean surface
+	LavaSize          = 2048,    -- lava ocean is LavaSize x LavaSize studs
+	IslandBaseHeight  = 12,      -- Y of the first island's walking surface
+	IslandRise        = 6,       -- each island is this much higher than the last
+	JumpGap           = 12,      -- horizontal gap between island edges (studs)
+	MovingPlatformSpeed = 6,     -- studs per second for moving platforms
+}
+
+-------------------------------------------------- COLOURS -------------
+ObbyConfig.Colors = {
+	Rock        = Color3.fromRGB(64, 58, 56),
+	RockDark    = Color3.fromRGB(43, 38, 36),
+	Lava        = Color3.fromRGB(255, 89, 0),
+	LavaHot     = Color3.fromRGB(255, 170, 30),
+	Checkpoint  = Color3.fromRGB(90, 200, 255),
+	CheckpointOn= Color3.fromRGB(80, 255, 120),
+	Treasure    = Color3.fromRGB(255, 200, 40),
+	SplatRed    = Color3.fromRGB(214, 25, 32),   -- stylized paint red
+	SplatRed2   = Color3.fromRGB(255, 70, 60),   -- lighter comic red
+	PoofWhite   = Color3.fromRGB(255, 245, 230),
+}
+
+-------------------------------------------------- DEATH ANIMATION -----
+ObbyConfig.Death = {
+	FreezeTime       = 0.35,  -- (1) frozen stiff before anything happens
+	ShakeTime        = 1.0,   -- (2) pressure build-up shake duration
+	ShakeIntensity   = 0.9,   -- max stud offset while shaking
+	InflateScale     = 1.35,  -- R15 characters puff up to this scale
+	SplatCount       = 10,    -- (3) red splat MeshParts spawned around character
+	ChunkCount       = 16,    -- (4) red chunks that fly out in the burst
+	StarCount        = 6,     -- white comic "poof" stars in the burst
+	GroundSplatCount = 5,     -- flat paint puddles left on the floor
+	EffectLifetime   = 2.5,   -- seconds before burst debris is cleaned up
+	RespawnDelay     = 2.2,   -- seconds from BOOM until respawn at checkpoint
+	CameraShakeTime  = 0.7,   -- client-side camera shake duration
+	CameraShakeMag   = 1.6,   -- client-side camera shake magnitude
+}
+
+-------------------------------------------------- SOUNDS --------------
+ObbyConfig.Sounds = {
+	-- Always-available built-in sounds (ship with the Roblox client):
+	Splat      = "rbxasset://sounds/splat.wav",          -- cartoon splat
+	Pop        = "rbxasset://sounds/short spring sound.wav",
+	Checkpoint = "rbxasset://sounds/electronicpingshort.wav",
+
+	-- Paste Creator-Store IDs you own here (leave "" to skip):
+	Boom         = "",   -- e.g. "rbxassetid://YOUR_CARTOON_EXPLOSION_ID"
+	VolcanoLoop  = "",   -- e.g. "rbxassetid://YOUR_RUMBLE_LOOP_ID"
+	Victory      = "",   -- e.g. "rbxassetid://YOUR_FANFARE_ID"
+}
+
+-------------------------------------------------- REMOTES -------------
+-- Names of the RemoteEvents the system creates inside
+-- ReplicatedStorage &gt; Remotes.  Referenced by server AND client.
+ObbyConfig.Remotes = {
+	Folder          = "Remotes",
+	PlayDeathFX     = "PlayDeathFX",     -- server -&gt; clients : camera shake / local boom
+	RequestReset    = "RequestReset",    -- client -&gt; server  : custom reset button
+	CheckpointReached = "CheckpointReached", -- server -&gt; client : UI ping
+}
+
+return ObbyConfig
+</ProtectedString>
+				</Properties>
+			</Item>
+		</Item>
+	</Item>
+	<Item class="ServerScriptService" referent="RBX5">
+		<Properties>
+			<string name="Name">ServerScriptService</string>
+		</Properties>
+		<Item class="Script" referent="RBX6">
+			<Properties>
+				<string name="Name">CheckpointService</string>
+				<ProtectedString name="Source">--[[
+	CheckpointService.server.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:  ServerScriptService &gt; CheckpointService (Script)
+
+	Checkpoint system for the Volcanic Arena Obby.
+
+	HOW CHECKPOINTS WORK:
+	  * Any BasePart tagged "Checkpoint" (CollectionService tag) with a
+	    number attribute "Order" is a checkpoint pad.  MapBuilder
+	    creates these for you; to add your own, tag any part
+	    "Checkpoint" and give it an Order attribute (1, 2, 3, ...).
+	  * Touching a pad with a HIGHER Order than your current one
+	    claims it: the pad flashes green, a ping plays, and the client
+	    gets a CheckpointReached event for UI.
+	  * The player's progress is stored as the attribute
+	    "CheckpointOrder" on the Player, and the respawn CFrame is
+	    cached here on the server.
+	  * After DeathHandler calls player:LoadCharacter(), this script's
+	    CharacterAdded hook teleports the fresh character to the last
+	    claimed checkpoint.
+--------------------------------------------------------------------]]
+
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local TweenService      = game:GetService("TweenService")
+local Debris            = game:GetService("Debris")
+
+local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ObbyConfig"))
+
+-- [player] = CFrame of last claimed checkpoint (above the pad)
+local respawnCFrames = {}
+
+local function getCheckpointReachedRemote()
+	local remotes = ReplicatedStorage:WaitForChild(Config.Remotes.Folder, 10)
+	return remotes and remotes:WaitForChild(Config.Remotes.CheckpointReached, 10)
+end
+
+--------------------------------------------------------------------
+-- Claiming checkpoints
+--------------------------------------------------------------------
+local function flashPad(pad)
+	local originalColor = pad.Color
+	pad.Color = Config.Colors.CheckpointOn
+	local light = Instance.new("PointLight")
+	light.Color = Config.Colors.CheckpointOn
+	light.Brightness = 4
+	light.Range = 14
+	light.Parent = pad
+	TweenService:Create(light, TweenInfo.new(1.2), { Brightness = 0 }):Play()
+	Debris:AddItem(light, 1.3)
+	task.delay(1.2, function()
+		-- Stay green once claimed by anyone (obby convention);
+		-- change this line to `pad.Color = originalColor` if you
+		-- prefer pads to reset.
+		pad.Color = Config.Colors.CheckpointOn:Lerp(originalColor, 0.35)
+	end)
+end
+
+local function playPing(pad)
+	if Config.Sounds.Checkpoint == "" then return end
+	local sound = Instance.new("Sound")
+	sound.SoundId = Config.Sounds.Checkpoint
+	sound.Volume = 0.7
+	sound.Parent = pad
+	sound:Play()
+	Debris:AddItem(sound, 3)
+end
+
+local function onCheckpointTouched(pad, hit)
+	local character = hit.Parent
+	local player = character and Players:GetPlayerFromCharacter(character)
+	if not player then return end
+
+	local order = pad:GetAttribute("Order")
+	if typeof(order) ~= "number" then return end
+
+	local current = player:GetAttribute("CheckpointOrder") or 0
+	if order &lt;= current then return end -- only ever move forward
+
+	player:SetAttribute("CheckpointOrder", order)
+	respawnCFrames[player] = pad.CFrame + Vector3.new(0, 4, 0)
+
+	flashPad(pad)
+	playPing(pad)
+
+	local remote = getCheckpointReachedRemote()
+	if remote then
+		remote:FireClient(player, order)
+	end
+end
+
+local function hookCheckpoint(pad)
+	pad.Touched:Connect(function(hit)
+		onCheckpointTouched(pad, hit)
+	end)
+end
+
+for _, pad in ipairs(CollectionService:GetTagged("Checkpoint")) do
+	hookCheckpoint(pad)
+end
+CollectionService:GetInstanceAddedSignal("Checkpoint"):Connect(hookCheckpoint)
+
+--------------------------------------------------------------------
+-- Respawning at the last checkpoint
+--------------------------------------------------------------------
+Players.PlayerAdded:Connect(function(player)
+	player:SetAttribute("CheckpointOrder", 0)
+
+	player.CharacterAdded:Connect(function(character)
+		local savedCFrame = respawnCFrames[player]
+		if not savedCFrame then return end -- no checkpoint yet: normal spawn
+
+		local root = character:WaitForChild("HumanoidRootPart", 10)
+		if root then
+			-- Wait one frame so the default spawn placement finishes
+			task.wait()
+			character:PivotTo(savedCFrame)
+		end
+	end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	respawnCFrames[player] = nil
+end)
+</ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="Script" referent="RBX7">
+			<Properties>
+				<string name="Name">DeathHandler</string>
+				<ProtectedString name="Source">--[[
+	DeathHandler.server.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:  ServerScriptService &gt; DeathHandler (Script)
+
+	The brain of the custom reset/death system:
+
+	  * Creates the RemoteEvents in ReplicatedStorage &gt; Remotes
+	  * Registers the "CartoonDebris" collision group (so flying
+	    chunks never push players around)
+	  * Kills players who touch anything tagged "Lava"
+	  * Listens for the client's custom Reset button (RequestReset)
+	  * Runs CartoonBurst.Play() and respawns at the last checkpoint
+
+	Works together with:
+	  ReplicatedStorage/Modules/CartoonBurst.lua   (the animation)
+	  ServerScriptService/CheckpointService.server.lua (spawn points)
+	  StarterPlayerScripts/ResetButtonHook.client.lua  (reset button)
+--------------------------------------------------------------------]]
+
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PhysicsService    = game:GetService("PhysicsService")
+local CollectionService = game:GetService("CollectionService")
+
+local Modules      = ReplicatedStorage:WaitForChild("Modules")
+local Config       = require(Modules:WaitForChild("ObbyConfig"))
+local CartoonBurst = require(Modules:WaitForChild("CartoonBurst"))
+
+-- We own the whole spawn/respawn cycle, so turn off Roblox's automatic
+-- respawn (it would double-spawn characters mid-animation).
+Players.CharacterAutoLoads = false
+
+--------------------------------------------------------------------
+-- RemoteEvents  (created here so nothing has to be made by hand)
+--------------------------------------------------------------------
+local remotes = ReplicatedStorage:FindFirstChild(Config.Remotes.Folder)
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = Config.Remotes.Folder
+	remotes.Parent = ReplicatedStorage
+end
+
+local function ensureRemote(name)
+	local remote = remotes:FindFirstChild(name)
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = remotes
+	end
+	return remote
+end
+
+ensureRemote(Config.Remotes.PlayDeathFX)
+local requestReset      = ensureRemote(Config.Remotes.RequestReset)
+local checkpointReached = ensureRemote(Config.Remotes.CheckpointReached) -- used by CheckpointService
+
+--------------------------------------------------------------------
+-- Collision group: debris chunks collide with the map, not players
+--------------------------------------------------------------------
+pcall(function()
+	PhysicsService:RegisterCollisionGroup("CartoonDebris")
+	PhysicsService:RegisterCollisionGroup("Players")
+	PhysicsService:CollisionGroupSetCollidable("CartoonDebris", "Players", false)
+	PhysicsService:CollisionGroupSetCollidable("CartoonDebris", "CartoonDebris", false)
+end)
+
+local function setCharacterCollisionGroup(character)
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CollisionGroup = "Players"
+		end
+	end
+	character.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("BasePart") then
+			descendant.CollisionGroup = "Players"
+		end
+	end)
+end
+
+--------------------------------------------------------------------
+-- The kill pipeline
+--------------------------------------------------------------------
+local KILL_COOLDOWN = 1 -- seconds; blocks double-triggers &amp; remote spam
+local dyingPlayers = {} -- [player] = true while the animation runs
+
+local function respawnAtCheckpoint(player)
+	dyingPlayers[player] = nil
+	if player.Parent ~= Players then return end -- left mid-animation
+	player:LoadCharacter()
+	-- CheckpointService.server.lua moves the new character to the
+	-- player's last checkpoint from its own CharacterAdded hook.
+end
+
+local function killPlayer(player)
+	if dyingPlayers[player] then return end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid then return end
+
+	dyingPlayers[player] = true
+
+	-- Keep Roblox's default ragdoll/death from firing mid-animation
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+	humanoid.BreakJointsOnDeath = false
+
+	CartoonBurst.Play(character, function()
+		respawnAtCheckpoint(player)
+	end)
+
+	-- Safety net: if anything errors inside the animation, still
+	-- respawn so the player is never soft-locked.
+	task.delay(Config.Death.FreezeTime + Config.Death.ShakeTime
+		+ Config.Death.RespawnDelay + 3, function()
+		if dyingPlayers[player] then
+			respawnAtCheckpoint(player)
+		end
+	end)
+end
+
+--------------------------------------------------------------------
+-- Triggers
+--------------------------------------------------------------------
+
+-- 1) Lava (any BasePart tagged "Lava" — MapBuilder tags the ocean)
+local function hookLavaPart(lavaPart)
+	lavaPart.Touched:Connect(function(hit)
+		local character = hit.Parent
+		local player = character and Players:GetPlayerFromCharacter(character)
+		if player then
+			killPlayer(player)
+		end
+	end)
+end
+for _, lavaPart in ipairs(CollectionService:GetTagged("Lava")) do
+	hookLavaPart(lavaPart)
+end
+CollectionService:GetInstanceAddedSignal("Lava"):Connect(hookLavaPart)
+
+-- 2) Custom Reset button (client fires RequestReset; validate server-side)
+local lastReset = {}
+requestReset.OnServerEvent:Connect(function(player)
+	local now = os.clock()
+	if lastReset[player] and now - lastReset[player] &lt; KILL_COOLDOWN then
+		return -- ignore spam
+	end
+	lastReset[player] = now
+	killPlayer(player)
+end)
+
+-- 3) Any other damage source (falling out of world, etc.):
+--    catch Died in case something kills the humanoid directly.
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		setCharacterCollisionGroup(character)
+		local humanoid = character:WaitForChild("Humanoid")
+		humanoid.Died:Connect(function()
+			if not dyingPlayers[player] then
+				-- Default death slipped through — still give it the
+				-- cartoon treatment before respawning.
+				killPlayer(player)
+			end
+		end)
+	end)
+
+	-- CharacterAutoLoads is off, so spawn the first character ourselves
+	player:LoadCharacter()
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	dyingPlayers[player] = nil
+	lastReset[player] = nil
+end)
+</ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="Script" referent="RBX8">
+			<Properties>
+				<string name="Name">MapBuilder</string>
+				<ProtectedString name="Source">--[[
+	MapBuilder.server.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:  ServerScriptService &gt; MapBuilder (Script)
+
+	Builds the entire "Volcanic Arena Obby" map from code at server
+	start, so you don't have to place a single part by hand:
+
+	  * Central circular spawn platform (with SpawnLocation)
+	  * A winding trail of floating rock islands rising over the lava
+	  * Obby jumps + TweenService moving platforms between islands
+	  * Checkpoint pads (tagged "Checkpoint" with an Order attribute —
+	    CheckpointService picks them up automatically)
+	  * A glowing lava ocean below everything (tagged "Lava" —
+	    DeathHandler makes it lethal)
+	  * A final golden treasure platform with a chest
+	  * Atmospheric lighting, smoke columns, rising embers, lava glow
+	    and (optional) ambient volcano rumble
+
+	Everything lands in a Workspace folder called "VolcanicArena", so
+	you can delete that one folder to remove the whole map.
+
+	Want to hand-build or decorate instead?  Turn any of the build
+	steps off at the BUILD SWITCHES table below and place your own
+	parts — as long as lava parts are tagged "Lava" and checkpoints
+	are tagged "Checkpoint" with an Order attribute, the systems work.
+--------------------------------------------------------------------]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local TweenService      = game:GetService("TweenService")
+local Lighting          = game:GetService("Lighting")
+
+local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ObbyConfig"))
+local C   = Config.Colors
+local MAP = Config.Map
+
+local BUILD_SWITCHES = {
+	Lava            = true,
+	SpawnPlatform   = true,
+	Islands         = true,
+	MovingPlatforms = true,
+	Treasure        = true,
+	Lighting        = true,
+	Ambience        = true,
+}
+
+local rng = Random.new(7) -- fixed seed: same arena every server start
+
+-- Root folder for the whole map
+local arena = Instance.new("Folder")
+arena.Name = "VolcanicArena"
+arena.Parent = workspace
+
+--------------------------------------------------------------------
+-- Part helpers
+--------------------------------------------------------------------
+local function newPart(props)
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	for key, value in pairs(props) do
+		part[key] = value
+	end
+	return part
+end
+
+-- A chunky rock disc: flattened cylinder + jagged chunks underneath
+local function makeIsland(centerPosition, radius)
+	local island = Instance.new("Model")
+	island.Name = "Island"
+
+	local top = newPart({
+		Name = "Surface",
+		Shape = Enum.PartType.Cylinder,
+		Material = Enum.Material.Slate,
+		Color = C.Rock,
+		Size = Vector3.new(3, radius * 2, radius * 2),
+		-- Cylinders point along X; roll so the flat face is up
+		CFrame = CFrame.new(centerPosition) * CFrame.Angles(0, 0, math.rad(90)),
+		Parent = island,
+	})
+
+	-- Glowing cracks ring under the rim (cheap lava-lit look)
+	local rim = newPart({
+		Name = "GlowRim",
+		Shape = Enum.PartType.Cylinder,
+		Material = Enum.Material.Neon,
+		Color = C.Lava,
+		Size = Vector3.new(0.6, radius * 2 + 0.4, radius * 2 + 0.4),
+		CFrame = top.CFrame * CFrame.new(-1.4, 0, 0), -- just below the surface
+		CanCollide = false,
+		Parent = island,
+	})
+	rim.Transparency = 0.35
+
+	-- Jagged rocks hanging below, so islands read as floating boulders
+	local chunkCount = rng:NextInteger(3, 5)
+	for i = 1, chunkCount do
+		local size = radius * rng:NextNumber(0.5, 0.9)
+		newPart({
+			Name = "UnderRock",
+			Material = Enum.Material.Basalt,
+			Color = C.RockDark,
+			Size = Vector3.new(size, size * rng:NextNumber(1.2, 2), size),
+			CFrame = CFrame.new(centerPosition + Vector3.new(
+					rng:NextNumber(-radius * 0.4, radius * 0.4),
+					-size * 0.8,
+					rng:NextNumber(-radius * 0.4, radius * 0.4)))
+				* CFrame.Angles(rng:NextNumber(0, 0.5), rng:NextNumber(0, 3), rng:NextNumber(0, 0.5)),
+			CanCollide = false,
+			Parent = island,
+		})
+	end
+
+	island.PrimaryPart = top
+	island.Parent = arena
+	return island, top
+end
+
+local function makeCheckpoint(position, order)
+	local pad = newPart({
+		Name = "Checkpoint" .. order,
+		Shape = Enum.PartType.Cylinder,
+		Material = Enum.Material.Neon,
+		Color = C.Checkpoint,
+		Size = Vector3.new(0.6, 7, 7),
+		CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)),
+		Parent = arena,
+	})
+	pad:SetAttribute("Order", order)
+	CollectionService:AddTag(pad, "Checkpoint")
+
+	-- Floating number above the pad
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromScale(4, 4)
+	gui.StudsOffset = Vector3.new(0, 5, 0)
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = 200
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = C.Checkpoint
+	label.TextStrokeTransparency = 0.4
+	label.Text = tostring(order)
+	label.Parent = gui
+	gui.Parent = pad
+	return pad
+end
+
+--------------------------------------------------------------------
+-- 1) LAVA OCEAN
+--------------------------------------------------------------------
+if BUILD_SWITCHES.Lava then
+	local lava = newPart({
+		Name = "LavaOcean",
+		Material = Enum.Material.Neon,
+		Color = C.Lava,
+		Size = Vector3.new(MAP.LavaSize, 16, MAP.LavaSize),
+		CFrame = CFrame.new(0, MAP.LavaHeight - 8, 0),
+		Parent = arena,
+	})
+	CollectionService:AddTag(lava, "Lava")
+
+	-- Slow "breathing" glow pulse
+	TweenService:Create(lava, TweenInfo.new(
+		3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true
+	), { Color = C.LavaHot }):Play()
+
+	-- A dark basalt shell around the lava so the horizon isn't neon
+	newPart({
+		Name = "BasaltRim",
+		Material = Enum.Material.Basalt,
+		Color = C.RockDark,
+		Size = Vector3.new(MAP.LavaSize + 200, 60, MAP.LavaSize + 200),
+		CFrame = CFrame.new(0, MAP.LavaHeight - 60, 0),
+		Parent = arena,
+	})
+end
+
+--------------------------------------------------------------------
+-- 2) CENTRAL SPAWN PLATFORM
+--------------------------------------------------------------------
+local spawnCenter = Vector3.new(0, MAP.IslandBaseHeight, 0)
+if BUILD_SWITCHES.SpawnPlatform then
+	local _, top = makeIsland(spawnCenter, 16)
+	top.Name = "SpawnIsland"
+
+	local spawnLocation = Instance.new("SpawnLocation")
+	spawnLocation.Size = Vector3.new(8, 1, 8)
+	spawnLocation.Anchored = true
+	spawnLocation.Material = Enum.Material.Slate
+	spawnLocation.Color = C.RockDark
+	spawnLocation.CFrame = CFrame.new(spawnCenter + Vector3.new(0, 2, 0))
+	spawnLocation.Duration = 0 -- no forcefield flicker
+	spawnLocation.Parent = arena
+
+	-- Decorative torch pillars around the spawn
+	for i = 1, 4 do
+		local angle = math.rad(i * 90 + 45)
+		local pos = spawnCenter + Vector3.new(math.cos(angle) * 13, 4, math.sin(angle) * 13)
+		local pillar = newPart({
+			Name = "TorchPillar",
+			Material = Enum.Material.Basalt,
+			Color = C.RockDark,
+			Size = Vector3.new(2, 6, 2),
+			CFrame = CFrame.new(pos),
+			Parent = arena,
+		})
+		local flame = Instance.new("Fire")
+		flame.Size = 6
+		flame.Heat = 12
+		flame.Color = C.LavaHot
+		flame.SecondaryColor = C.Lava
+		flame.Parent = pillar
+		local light = Instance.new("PointLight")
+		light.Color = C.LavaHot
+		light.Range = 18
+		light.Brightness = 2
+		light.Parent = pillar
+	end
+end
+
+--------------------------------------------------------------------
+-- 3) ISLAND TRAIL + OBBY JUMPS + CHECKPOINTS
+--------------------------------------------------------------------
+-- The trail spirals outward and upward from spawn.  Every few
+-- islands gets a checkpoint; some gaps get small hop-stones, others
+-- get a moving platform (built in step 4).
+local trail = {}          -- { {center = Vector3, radius = number}, ... }
+local movingGaps = {}     -- { {from = Vector3, to = Vector3}, ... }
+
+if BUILD_SWITCHES.Islands then
+	local ISLAND_COUNT = 12
+	local angle = 0
+	local distance = 42
+	local height = MAP.IslandBaseHeight
+	local previousCenter = spawnCenter
+	local previousRadius = 16
+	local checkpointOrder = 0
+
+	for i = 1, ISLAND_COUNT do
+		angle += rng:NextNumber(0.5, 0.8)          -- spiral around the arena
+		distance += rng:NextNumber(16, 24)
+		height += MAP.IslandRise
+
+		local radius = rng:NextNumber(7, 11)
+		local center = Vector3.new(
+			math.cos(angle) * distance, height, math.sin(angle) * distance)
+		makeIsland(center, radius)
+		table.insert(trail, { center = center, radius = radius })
+
+		local gap = (Vector3.new(center.X, 0, center.Z)
+			- Vector3.new(previousCenter.X, 0, previousCenter.Z)).Magnitude
+			- radius - previousRadius
+
+		if i % 4 == 2 then
+			-- Long gap: bridged by a moving platform (step 4)
+			table.insert(movingGaps, { from = previousCenter, to = center })
+		elseif gap &gt; MAP.JumpGap then
+			-- Medium gap: scatter 1-2 small hop-stones so it's jumpable
+			local hops = math.floor(gap / MAP.JumpGap)
+			for h = 1, hops do
+				local t = h / (hops + 1)
+				local hopCenter = previousCenter:Lerp(center, t) + Vector3.new(
+					rng:NextNumber(-3, 3), 1, rng:NextNumber(-3, 3))
+				makeIsland(hopCenter, rng:NextNumber(2.5, 4))
+			end
+		end
+
+		-- Checkpoint every third island
+		if i % 3 == 0 then
+			checkpointOrder += 1
+			makeCheckpoint(center + Vector3.new(0, 2, 0), checkpointOrder)
+		end
+
+		previousCenter = center
+		previousRadius = radius
+	end
+end
+
+--------------------------------------------------------------------
+-- 4) MOVING PLATFORMS (TweenService, linear so riding feels fair)
+--------------------------------------------------------------------
+if BUILD_SWITCHES.MovingPlatforms then
+	for _, gapInfo in ipairs(movingGaps) do
+		local from = gapInfo.from + Vector3.new(0, 2.5, 0)
+		local to   = gapInfo.to   + Vector3.new(0, 2.5, 0)
+		local midHeight = math.max(from.Y, to.Y)
+		local startCFrame = CFrame.new(from.X, midHeight, from.Z)
+		local endCFrame   = CFrame.new(to.X,   midHeight, to.Z)
+
+		local platform = newPart({
+			Name = "MovingPlatform",
+			Material = Enum.Material.Basalt,
+			Color = C.RockDark,
+			Size = Vector3.new(8, 1.5, 8),
+			CFrame = startCFrame,
+			Parent = arena,
+		})
+		-- Neon edge strip so players can spot it against the dark
+		local strip = newPart({
+			Name = "EdgeGlow",
+			Material = Enum.Material.Neon,
+			Color = C.LavaHot,
+			Size = Vector3.new(8.4, 0.4, 8.4),
+			CFrame = startCFrame * CFrame.new(0, -0.6, 0),
+			CanCollide = false,
+			Parent = platform,
+		})
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = platform
+		weld.Part1 = strip
+		weld.Parent = platform
+		strip.Anchored = false
+
+		local travelTime = (endCFrame.Position - startCFrame.Position).Magnitude
+			/ MAP.MovingPlatformSpeed
+		-- Linear + auto-reverse + infinite repeats = permanent ferry
+		TweenService:Create(platform, TweenInfo.new(
+			travelTime, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut,
+			-1, true, 0.6
+		), { CFrame = endCFrame }):Play()
+	end
+end
+
+--------------------------------------------------------------------
+-- 5) FINAL TREASURE PLATFORM
+--------------------------------------------------------------------
+if BUILD_SWITCHES.Treasure and #trail &gt; 0 then
+	local last = trail[#trail]
+	local direction = Vector3.new(last.center.X, 0, last.center.Z).Unit
+	local treasureCenter = last.center + direction * 34 + Vector3.new(0, MAP.IslandRise, 0)
+
+	local _, top = makeIsland(treasureCenter, 14)
+	top.Name = "TreasureIsland"
+	top.Color = Color3.fromRGB(80, 66, 50) -- warmer rock for the finale
+
+	-- Final checkpoint on the treasure island
+	local finalOrder = 99
+	makeCheckpoint(treasureCenter + Vector3.new(-8, 2, 0), finalOrder)
+
+	-- The chest: simple stylized box + lid + glow
+	local chestBase = newPart({
+		Name = "ChestBase",
+		Material = Enum.Material.Wood,
+		Color = Color3.fromRGB(112, 70, 34),
+		Size = Vector3.new(6, 3.5, 4),
+		CFrame = CFrame.new(treasureCenter + Vector3.new(0, 3.5, 0)),
+		Parent = arena,
+	})
+	newPart({
+		Name = "ChestLid",
+		Material = Enum.Material.Wood,
+		Color = Color3.fromRGB(92, 56, 26),
+		Size = Vector3.new(6.2, 1.4, 4.2),
+		CFrame = chestBase.CFrame * CFrame.new(0, 2.2, -0.6) * CFrame.Angles(math.rad(-35), 0, 0),
+		Parent = arena,
+	})
+	local gold = newPart({
+		Name = "ChestGold",
+		Material = Enum.Material.Neon,
+		Color = C.Treasure,
+		Size = Vector3.new(5.4, 1, 3.4),
+		CFrame = chestBase.CFrame * CFrame.new(0, 1.9, 0.4),
+		CanCollide = false,
+		Parent = arena,
+	})
+	local goldLight = Instance.new("PointLight")
+	goldLight.Color = C.Treasure
+	goldLight.Brightness = 3
+	goldLight.Range = 24
+	goldLight.Parent = gold
+
+	-- Sky beam so the goal is visible from spawn
+	local beam = newPart({
+		Name = "GoalBeam",
+		Material = Enum.Material.Neon,
+		Color = C.Treasure,
+		Size = Vector3.new(1.5, 300, 1.5),
+		CFrame = CFrame.new(treasureCenter + Vector3.new(0, 150, 0)),
+		CanCollide = false,
+		Transparency = 0.6,
+		Parent = arena,
+	})
+	beam.CanQuery = false
+
+	-- Victory: sparkle + fanfare + message on touching the chest
+	local celebrated = {} -- [player] = true, one celebration each
+	chestBase.Touched:Connect(function(hit)
+		local player = game:GetService("Players"):GetPlayerFromCharacter(hit.Parent)
+		if not player or celebrated[player] then return end
+		celebrated[player] = true
+
+		local sparkle = Instance.new("ParticleEmitter")
+		sparkle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		sparkle.Color = ColorSequence.new(C.Treasure)
+		sparkle.Lifetime = NumberRange.new(0.8, 1.5)
+		sparkle.Speed = NumberRange.new(8, 16)
+		sparkle.SpreadAngle = Vector2.new(180, 180)
+		sparkle.Rate = 0
+		sparkle.Parent = chestBase
+		sparkle:Emit(80)
+		game:GetService("Debris"):AddItem(sparkle, 3)
+
+		if Config.Sounds.Victory ~= "" then
+			local fanfare = Instance.new("Sound")
+			fanfare.SoundId = Config.Sounds.Victory
+			fanfare.Parent = chestBase
+			fanfare:Play()
+			game:GetService("Debris"):AddItem(fanfare, 8)
+		end
+	end)
+end
+
+--------------------------------------------------------------------
+-- 6) ATMOSPHERE, LIGHTING &amp; PARTICLE AMBIENCE
+--------------------------------------------------------------------
+if BUILD_SWITCHES.Lighting then
+	Lighting.ClockTime = 2                -- volcanic night
+	Lighting.Brightness = 1.5
+	Lighting.Ambient = Color3.fromRGB(45, 25, 20)
+	Lighting.OutdoorAmbient = Color3.fromRGB(70, 35, 25)
+	Lighting.FogEnd = 700
+	Lighting.FogColor = Color3.fromRGB(60, 22, 10)
+
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+	atmosphere.Density = 0.35
+	atmosphere.Haze = 2.2
+	atmosphere.Color = Color3.fromRGB(120, 60, 40)
+	atmosphere.Decay = Color3.fromRGB(140, 60, 30)
+	atmosphere.Glare = 0.4
+	atmosphere.Parent = Lighting
+
+	local bloom = Lighting:FindFirstChildOfClass("BloomEffect") or Instance.new("BloomEffect")
+	bloom.Intensity = 0.6
+	bloom.Threshold = 1.2
+	bloom.Size = 40
+	bloom.Parent = Lighting
+
+	local colorCorrection = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+		or Instance.new("ColorCorrectionEffect")
+	colorCorrection.TintColor = Color3.fromRGB(255, 230, 215)
+	colorCorrection.Contrast = 0.12
+	colorCorrection.Saturation = 0.08
+	colorCorrection.Parent = Lighting
+end
+
+if BUILD_SWITCHES.Ambience then
+	-- Smoke columns rising from the lava at the arena edges
+	for i = 1, 6 do
+		local angle = math.rad(i * 60)
+		local dist = rng:NextNumber(120, 220)
+		local anchor = newPart({
+			Name = "SmokeColumn",
+			Transparency = 1,
+			CanCollide = false,
+			CanQuery = false,
+			Size = Vector3.new(4, 4, 4),
+			CFrame = CFrame.new(math.cos(angle) * dist, MAP.LavaHeight + 4, math.sin(angle) * dist),
+			Parent = arena,
+		})
+		local smoke = Instance.new("ParticleEmitter")
+		smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+		smoke.Color = ColorSequence.new(Color3.fromRGB(70, 45, 40), Color3.fromRGB(25, 25, 25))
+		smoke.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 8),
+			NumberSequenceKeypoint.new(1, 24),
+		})
+		smoke.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.4),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		smoke.Lifetime = NumberRange.new(6, 10)
+		smoke.Speed = NumberRange.new(6, 12)
+		smoke.Rate = 4
+		smoke.Rotation = NumberRange.new(0, 360)
+		smoke.RotSpeed = NumberRange.new(-20, 20)
+		smoke.Parent = anchor
+	end
+
+	-- Rising orange embers across the whole arena
+	local emberAnchor = newPart({
+		Name = "EmberField",
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		Size = Vector3.new(400, 1, 400),
+		CFrame = CFrame.new(0, MAP.LavaHeight + 6, 0),
+		Parent = arena,
+	})
+	local embers = Instance.new("ParticleEmitter")
+	embers.Texture = "rbxasset://textures/particles/fire_main.dds"
+	embers.Color = ColorSequence.new(C.LavaHot, C.Lava)
+	embers.Size = NumberSequence.new(0.35)
+	embers.Lifetime = NumberRange.new(4, 8)
+	embers.Speed = NumberRange.new(8, 14)
+	embers.Rate = 30
+	embers.LightEmission = 1
+	embers.Acceleration = Vector3.new(2, 4, 1) -- lazy sideways drift
+	embers.Parent = emberAnchor
+
+	-- Looping volcano rumble (only if you pasted an ID in ObbyConfig)
+	if Config.Sounds.VolcanoLoop ~= "" then
+		local rumble = Instance.new("Sound")
+		rumble.Name = "VolcanoRumble"
+		rumble.SoundId = Config.Sounds.VolcanoLoop
+		rumble.Looped = true
+		rumble.Volume = 0.4
+		rumble.Parent = workspace
+		rumble:Play()
+	end
+end
+
+print("[VolcanicArena] Map built: " .. #trail .. " islands, "
+	.. #movingGaps .. " moving platforms.")
+</ProtectedString>
+			</Properties>
+		</Item>
+	</Item>
+	<Item class="StarterPlayer" referent="RBX9">
+		<Properties>
+			<string name="Name">StarterPlayer</string>
+		</Properties>
+		<Item class="StarterPlayerScripts" referent="RBX10">
+			<Properties>
+				<string name="Name">StarterPlayerScripts</string>
+			</Properties>
+			<Item class="LocalScript" referent="RBX11">
+				<Properties>
+					<string name="Name">DeathEffectsClient</string>
+					<ProtectedString name="Source">--[[
+	DeathEffectsClient.client.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:
+	  StarterPlayer &gt; StarterPlayerScripts &gt; DeathEffectsClient (LocalScript)
+
+	Client half of the cartoon death animation.  When the server's
+	CartoonBurst module reaches the BOOM, it fires PlayDeathFX to all
+	clients with the burst position.  This script then:
+
+	  * Shakes the local camera (stronger the closer you are)
+	  * Flashes a quick red comic "splat" vignette if it was YOUR burst
+	  * Plays a local boom whose volume falls off with distance
+
+	Also listens to CheckpointReached and pops a small "CHECKPOINT!"
+	toast at the top of the screen.
+--------------------------------------------------------------------]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local SoundService      = game:GetService("SoundService")
+local Players           = game:GetService("Players")
+
+local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ObbyConfig"))
+local D = Config.Death
+
+local player  = Players.LocalPlayer
+local remotes = ReplicatedStorage:WaitForChild(Config.Remotes.Folder)
+local playDeathFX       = remotes:WaitForChild(Config.Remotes.PlayDeathFX)
+local checkpointReached = remotes:WaitForChild(Config.Remotes.CheckpointReached)
+
+local rng = Random.new()
+
+--------------------------------------------------------------------
+-- Screen GUI (red flash + checkpoint toast)
+--------------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "VolcanicArenaFX"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local redFlash = Instance.new("Frame")
+redFlash.Name = "RedFlash"
+redFlash.Size = UDim2.fromScale(1, 1)
+redFlash.BackgroundColor3 = Config.Colors.SplatRed
+redFlash.BackgroundTransparency = 1
+redFlash.BorderSizePixel = 0
+redFlash.ZIndex = 10
+redFlash.Parent = screenGui
+
+local toast = Instance.new("TextLabel")
+toast.Name = "CheckpointToast"
+toast.AnchorPoint = Vector2.new(0.5, 0)
+toast.Position = UDim2.new(0.5, 0, 0.08, 0)
+toast.Size = UDim2.fromScale(0.4, 0.07)
+toast.BackgroundTransparency = 1
+toast.Font = Enum.Font.FredokaOne
+toast.TextScaled = true
+toast.TextColor3 = Config.Colors.CheckpointOn
+toast.TextStrokeTransparency = 0.3
+toast.TextTransparency = 1
+toast.Text = ""
+toast.Parent = screenGui
+
+--------------------------------------------------------------------
+-- Camera shake
+--------------------------------------------------------------------
+local SHAKE_BINDING = "VolcanicArenaCameraShake"
+local shakeActive = false
+
+local function shakeCamera(magnitude)
+	if shakeActive then
+		RunService:UnbindFromRenderStep(SHAKE_BINDING)
+	end
+	shakeActive = true
+	local elapsed = 0
+	-- Bound AFTER the default camera update (priority Camera + 1) so
+	-- our offset is applied on top of it and never overwritten.
+	RunService:BindToRenderStep(SHAKE_BINDING, Enum.RenderPriority.Camera.Value + 1, function(dt)
+		elapsed += dt
+		if elapsed &gt;= D.CameraShakeTime then
+			RunService:UnbindFromRenderStep(SHAKE_BINDING)
+			shakeActive = false
+			return
+		end
+		-- Decaying random offset each frame
+		local decay = 1 - (elapsed / D.CameraShakeTime)
+		local strength = magnitude * decay
+		local camera = workspace.CurrentCamera
+		camera.CFrame = camera.CFrame * CFrame.new(
+			rng:NextNumber(-strength, strength) * 0.25,
+			rng:NextNumber(-strength, strength) * 0.25,
+			0
+		) * CFrame.Angles(
+			math.rad(rng:NextNumber(-strength, strength)),
+			math.rad(rng:NextNumber(-strength, strength)),
+			math.rad(rng:NextNumber(-strength, strength) * 0.5)
+		)
+	end)
+end
+
+--------------------------------------------------------------------
+-- BOOM handler
+--------------------------------------------------------------------
+playDeathFX.OnClientEvent:Connect(function(burstPosition)
+	local camera = workspace.CurrentCamera
+	local distance = (camera.CFrame.Position - burstPosition).Magnitude
+
+	-- Shake scales down with distance; inaudible past ~150 studs
+	local falloff = math.clamp(1 - distance / 150, 0, 1)
+	if falloff &gt; 0 then
+		shakeCamera(D.CameraShakeMag * falloff)
+	end
+
+	-- Local boom (if configured) with distance-based volume
+	if Config.Sounds.Boom ~= "" and falloff &gt; 0 then
+		local boom = Instance.new("Sound")
+		boom.SoundId = Config.Sounds.Boom
+		boom.Volume = falloff
+		boom.PlaybackSpeed = rng:NextNumber(0.95, 1.1)
+		boom.Parent = SoundService
+		boom:Play()
+		boom.Ended:Once(function() boom:Destroy() end)
+	end
+
+	-- Red comic flash only when it's the local player bursting
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root and (root.Position - burstPosition).Magnitude &lt; 8 then
+		redFlash.BackgroundTransparency = 0.35
+		TweenService:Create(redFlash, TweenInfo.new(
+			0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out
+		), { BackgroundTransparency = 1 }):Play()
+	end
+end)
+
+--------------------------------------------------------------------
+-- Checkpoint toast
+--------------------------------------------------------------------
+checkpointReached.OnClientEvent:Connect(function(order)
+	toast.Text = order &gt;= 99 and "FINAL CHECKPOINT!" or ("CHECKPOINT " .. order .. "!")
+	toast.TextTransparency = 0
+	toast.TextStrokeTransparency = 0.3
+	toast.Position = UDim2.new(0.5, 0, 0.06, 0)
+	TweenService:Create(toast, TweenInfo.new(
+		0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out
+	), { Position = UDim2.new(0.5, 0, 0.08, 0) }):Play()
+	task.delay(1.6, function()
+		TweenService:Create(toast, TweenInfo.new(0.5), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+		}):Play()
+	end)
+end)
+</ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="LocalScript" referent="RBX12">
+				<Properties>
+					<string name="Name">ResetButtonHook</string>
+					<ProtectedString name="Source">--[[
+	ResetButtonHook.client.lua
+	--------------------------------------------------------------------
+	WHERE THIS GOES:
+	  StarterPlayer &gt; StarterPlayerScripts &gt; ResetButtonHook (LocalScript)
+
+	Replaces Roblox's default Reset Character button (Esc menu) with
+	our cartoon death animation.  When the player clicks Reset, instead
+	of instantly killing the character, we fire the RequestReset
+	RemoteEvent and let the server run CartoonBurst + checkpoint
+	respawn.
+
+	NOTE: SetCore("ResetButtonCallback") can throw if CoreGui hasn't
+	finished loading, so we retry in a loop — this is the standard
+	pattern recommended by Roblox.
+--------------------------------------------------------------------]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui        = game:GetService("StarterGui")
+
+local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ObbyConfig"))
+
+local remotes      = ReplicatedStorage:WaitForChild(Config.Remotes.Folder)
+local requestReset = remotes:WaitForChild(Config.Remotes.RequestReset)
+
+-- The reset button fires this BindableEvent instead of killing us
+local resetBindable = Instance.new("BindableEvent")
+resetBindable.Event:Connect(function()
+	requestReset:FireServer()
+end)
+
+-- Retry until CoreGui accepts the callback (can take a few frames)
+task.spawn(function()
+	local tries = 0
+	while tries &lt; 30 do
+		local ok = pcall(function()
+			StarterGui:SetCore("ResetButtonCallback", resetBindable)
+		end)
+		if ok then return end
+		tries += 1
+		task.wait(0.5)
+	end
+	warn("[VolcanicArena] Could not hook the reset button; default reset stays active.")
+end)
+</ProtectedString>
+				</Properties>
+			</Item>
+		</Item>
+	</Item>
+</roblox>
