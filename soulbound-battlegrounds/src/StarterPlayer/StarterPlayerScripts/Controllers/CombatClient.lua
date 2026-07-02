@@ -99,15 +99,17 @@ local fxHandlers: { [string]: (payload: any) -> () } = {
 		if typeof(p.position) == "Vector3" then
 			VFXUtil.HitSpark(p.position, colorFor(p.weapon))
 		end
-		-- Local-player extras
-		local myCharacter = player.Character
-		if p.victim == myCharacter then
-			CameraController.Shake(0.4)
-		end
 		if typeof(p.damage) == "number" and p.position then
 			UIController.ShowDamageNumber(p.position, p.damage)
 		end
-		hitStop()
+		-- Punch feedback only for hits the local player is part of
+		local myCharacter = player.Character
+		if p.victim == myCharacter then
+			CameraController.Shake(0.4)
+			hitStop()
+		elseif p.attacker == myCharacter then
+			hitStop()
+		end
 	end,
 	M1Swing = function(p)
 		local root = rootOf(p.character)

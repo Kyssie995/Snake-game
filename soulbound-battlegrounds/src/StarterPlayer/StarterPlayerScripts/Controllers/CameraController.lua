@@ -67,8 +67,10 @@ end
 
 function CameraController.Init()
 	camera.FieldOfView = BASE_FOV
-	-- Shake decay loop
-	RunService.RenderStepped:Connect(function(dt)
+	-- Shake decay loop. Must run AFTER the default camera scripts write
+	-- camera.CFrame each frame, or the offset gets overwritten — hence
+	-- BindToRenderStep at Camera priority + 1 instead of .RenderStepped.
+	RunService:BindToRenderStep("SoulboundCameraShake", Enum.RenderPriority.Camera.Value + 1, function(dt)
 		if shakeIntensity > 0.01 then
 			local offset = Vector3.new(
 				(math.random() - 0.5) * shakeIntensity,

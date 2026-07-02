@@ -97,6 +97,16 @@ local function load(player: Player)
 	end)
 	if not ok then
 		warn("[DataService] load failed for " .. player.Name .. ": " .. tostring(err))
+		if RunService:IsStudio() then
+			-- Studio without API access: fall back to an in-memory profile so
+			-- testing isn't blocked. Nothing will save.
+			warn("[DataService] Studio fallback: using in-memory profile (enable"
+				.. " 'Studio Access to API Services' to test persistence)")
+			if player.Parent then
+				profiles[player] = defaultProfile()
+			end
+			return
+		end
 		player:Kick("Data failed to load. Please rejoin.")
 		return
 	end

@@ -53,7 +53,7 @@ Server-authoritative. Client sends *intents* (RemoteEvents); server validates, r
 | M1 combo | LMB ×4 | 3 quick slashes + finisher. Finisher ragdolls + knocks back. Hold W+M1 finisher = forward launch; hold Space+M1 finisher = **air launch** (enables air combos). |
 | Block | Hold F | Reduces damage 100% vs M1s, 50% vs abilities. Block HP breaks under pressure → guard break stun. |
 | Guard break | Hold M1 (charged heavy) | Breaks block, ragdolls blocking targets. Slow windup — reactable. Heavy attacks trigger **Soul Clash** checks. |
-| Dodge / Soul Dash | Q (+direction) | Short i-frame dash, 2s cooldown. **Perfect dodge:** dodging within 0.25s of an incoming hit refunds the cooldown, slows time for you locally (0.3s), and marks attacker briefly vulnerable (1.2s, +20% damage taken). |
+| Dodge / Soul Dash | Q (+direction) | Short i-frame dash (0.22s), 2s cooldown. **Perfect dodge:** if the avoided hit arrives within the first 0.12s of the dash, the cooldown refunds, a local slow-mo punch plays, and the attacker is marked vulnerable (1.2s, +20% damage taken). |
 | Sprint / Soul-run | Hold Shift | Faster movement, spirit-trail VFX. |
 | Abilities | 1 / 2 / 3 / 4 | Weapon moves, cooldown-based. |
 | Ultimate — Final Release | G (when charged & unlocked) | Transformation. See §6. |

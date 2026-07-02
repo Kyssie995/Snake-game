@@ -49,7 +49,10 @@ return {
 		DISTANCE = 22,
 		DURATION = 0.22,
 		IFRAME_TIME = 0.22,
-		PERFECT_WINDOW = 0.25, -- dodge started within this of an incoming hit
+		-- A dodged hit counts as "perfect" only if it arrives within this
+		-- long of the dash START. Must be < IFRAME_TIME, otherwise every
+		-- i-framed hit is perfect and the mechanic loses meaning.
+		PERFECT_WINDOW = 0.12,
 		VULNERABLE_TIME = 1.2, -- attacker marked vulnerable after perfect dodge
 		VULNERABLE_MULT = 1.2,
 	},

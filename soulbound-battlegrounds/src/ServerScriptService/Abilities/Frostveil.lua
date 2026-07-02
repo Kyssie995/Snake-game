@@ -51,14 +51,20 @@ Frostveil.Moves[1] = function(ctx)
 				return
 			end
 			local cframe = origin * CFrame.new(0, 0, -(move.range / steps) * i)
-			-- Wave dies against walls: check the path is clear
+			-- Wave dies against walls: check the path is clear. "Wall" means
+			-- a collidable part that is NOT inside a character (humanoid
+			-- check — the map itself may be grouped in a Model).
 			local rayParams = RaycastParams.new()
 			rayParams.FilterType = Enum.RaycastFilterType.Exclude
 			rayParams.FilterDescendantsInstances = { character }
 			local blocked = Workspace:Raycast(origin.Position, cframe.Position - origin.Position, rayParams)
-			if blocked and blocked.Instance.CanCollide and not blocked.Instance:FindFirstAncestorOfClass("Model") then
-				Combat.BroadcastFX({ fx = "FrostveilIceShatter", position = blocked.Position })
-				return
+			if blocked and blocked.Instance.CanCollide then
+				local ancestorModel = blocked.Instance:FindFirstAncestorOfClass("Model")
+				local isCharacter = ancestorModel and ancestorModel:FindFirstChildOfClass("Humanoid") ~= nil
+				if not isCharacter then
+					Combat.BroadcastFX({ fx = "FrostveilIceShatter", position = blocked.Position })
+					return
+				end
 			end
 			local hits = Hitbox.Sweep({
 				attacker = character,

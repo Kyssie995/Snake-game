@@ -187,14 +187,18 @@ local function isBlockingAgainst(victimState: CombatState, victim: Model, attack
 end
 
 local function handleDeath(victim: Model, victimState: CombatState, killer: Player?)
-	-- Kill + assist credit
-	if killer then
+	-- Kill + assist credit (players only — dummy kills would be farmable,
+	-- and dummy damage XP is already capped separately)
+	local isDummy = victim:GetAttribute("IsTrainingDummy") == true
+	if killer and not isDummy then
 		ProgressionService.AwardKill(killer)
 	end
 	local now = os.clock()
-	for attacker, lastHit in victimState.recentAttackers do
-		if attacker ~= killer and now - lastHit <= Constants.PROGRESSION.ASSIST_WINDOW and attacker.Parent then
-			ProgressionService.AwardAssist(attacker)
+	if not isDummy then
+		for attacker, lastHit in victimState.recentAttackers do
+			if attacker ~= killer and now - lastHit <= Constants.PROGRESSION.ASSIST_WINDOW and attacker.Parent then
+				ProgressionService.AwardAssist(attacker)
+			end
 		end
 	end
 	-- Death energy penalty
@@ -317,6 +321,7 @@ function CombatService.DealDamage(victim: Model, info: DamageInfo): boolean
 			weapon = info.attackerPlayer and select(1, CombatService.GetEquippedWeaponId(info.attackerPlayer)) or nil,
 			damage = amount,
 			victim = victim,
+			attacker = info.attacker,
 		})
 	end
 
@@ -576,15 +581,9 @@ local function onCharacterAdded(player: Player, character: Model)
 		local tier = ProgressionService.GetAuraTier(player, weaponId)
 		character:SetAttribute("AuraTier", tier)
 	end
+	ProgressionService.PushHUDSnapshot(player)
 
-	humanoid.Died:Connect(function()
-		task.delay(Constants.RESPAWN_TIME, function()
-			if player.Parent then
-				player:LoadCharacter()
-			end
-		end)
-	end)
-
+	-- Respawn is handled by the engine: Players.RespawnTime is set in Init.
 	character.AncestryChanged:Connect(function(_, parent)
 		if not parent then
 			states[character] = nil
@@ -637,7 +636,9 @@ function CombatService.Init()
 		end
 	end)
 
-	Players.PlayerAdded:Connect(function(player)
+	Players.RespawnTime = Constants.RESPAWN_TIME
+
+	local function hookPlayer(player: Player)
 		player.CharacterAdded:Connect(function(character)
 			-- Wait for profile before combat state (equipped weapon needed)
 			task.spawn(function()
@@ -645,7 +646,22 @@ function CombatService.Init()
 				onCharacterAdded(player, character)
 			end)
 		end)
-	end)
+		-- Character may already exist (Studio Play Solo joins before
+		-- services finish initializing)
+		if player.Character then
+			task.spawn(function()
+				DataService.WaitForProfile(player)
+				if player.Character and not getState(player.Character) then
+					onCharacterAdded(player, player.Character)
+				end
+			end)
+		end
+	end
+
+	Players.PlayerAdded:Connect(hookPlayer)
+	for _, player in Players:GetPlayers() do
+		hookPlayer(player)
+	end
 
 	-- Block regen + in-combat energy ticker
 	task.spawn(function()

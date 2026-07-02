@@ -57,6 +57,26 @@ function ProgressionService.GetAuraTier(player: Player, weaponId: string): numbe
 	return tier
 end
 
+-- Push the full progression snapshot to a client (called on spawn so the
+-- HUD isn't blank until the first XP/token event).
+function ProgressionService.PushHUDSnapshot(player: Player)
+	local profile = DataService.GetProfile(player)
+	if not profile then
+		return
+	end
+	local weaponId = profile.equippedWeapon
+	local data = profile.weapons[weaponId]
+	if data then
+		pushHUD(player, "WeaponXP", {
+			weapon = weaponId,
+			xp = data.xp,
+			level = data.level,
+			toNext = P.XPToNext(data.level),
+		})
+	end
+	pushHUD(player, "Tokens", profile.spiritTokens)
+end
+
 function ProgressionService.AwardXP(player: Player, amount: number, isDummy: boolean?)
 	local profile = DataService.GetProfile(player)
 	if not profile or amount <= 0 then
