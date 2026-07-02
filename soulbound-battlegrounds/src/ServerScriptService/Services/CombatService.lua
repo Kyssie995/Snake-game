@@ -447,6 +447,12 @@ local function doM1(player: Player, variant: string?)
 						info.amount *= bonus
 					end
 				end
+				-- Vanish Step bonus: armed by the ability, consumed by the
+				-- first M1 that lands
+				if character:GetAttribute("VanishBonus") == true then
+					info.amount += 8
+					character:SetAttribute("VanishBonus", false)
+				end
 			end
 			CombatService.DealDamage(victim, info)
 			-- Ultimate on-hit hooks (e.g. Tempest King 3rd-M1 lightning)

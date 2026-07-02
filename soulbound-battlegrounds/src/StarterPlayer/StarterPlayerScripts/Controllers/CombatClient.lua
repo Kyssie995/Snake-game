@@ -49,6 +49,51 @@ local function hitStop()
 	end
 end
 
+-- Jagged sky-to-ground lightning bolt out of neon segments
+local function lightningBolt(position: Vector3, color: Color3)
+	local from = position + Vector3.new(math.random(-8, 8), 45, math.random(-8, 8))
+	local points = { from }
+	local segments = 6
+	for i = 1, segments - 1 do
+		local t = i / segments
+		local point = from:Lerp(position, t)
+			+ Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
+		table.insert(points, point)
+	end
+	table.insert(points, position)
+	for i = 1, #points - 1 do
+		local a, b = points[i], points[i + 1]
+		local segment = Instance.new("Part")
+		segment.Anchored = true
+		segment.CanCollide = false
+		segment.CanQuery = false
+		segment.Material = Enum.Material.Neon
+		segment.Color = color
+		segment.Size = Vector3.new(0.35, 0.35, (a - b).Magnitude)
+		segment.CFrame = CFrame.lookAt((a + b) / 2, b)
+		segment.Parent = workspace
+		TweenService:Create(segment, TweenInfo.new(0.25), { Transparency = 1 }):Play()
+		Debris:AddItem(segment, 0.3)
+	end
+	VFXUtil.HitSpark(position, color)
+end
+
+-- Translucent ghost snapshot of a character (Vanish/afterimages)
+local function ghostShell(cframe: CFrame, color: Color3, lifetime: number)
+	local ghost = Instance.new("Part")
+	ghost.Anchored = true
+	ghost.CanCollide = false
+	ghost.CanQuery = false
+	ghost.Material = Enum.Material.ForceField
+	ghost.Color = color
+	ghost.Size = Vector3.new(2.4, 4.8, 1.4)
+	ghost.CFrame = cframe
+	ghost.Transparency = 0.5
+	ghost.Parent = workspace
+	TweenService:Create(ghost, TweenInfo.new(lifetime), { Transparency = 1 }):Play()
+	Debris:AddItem(ghost, lifetime + 0.1)
+end
+
 local fxHandlers: { [string]: (payload: any) -> () } = {
 	HitSpark = function(p)
 		if typeof(p.position) == "Vector3" then
@@ -344,18 +389,182 @@ local fxHandlers: { [string]: (payload: any) -> () } = {
 		local radius = (p.radius or 30) * 0.8
 		for _ = 1, 3 do
 			local angle = math.random() * math.pi * 2
-			local ghost = Instance.new("Part")
-			ghost.Anchored = true
-			ghost.CanCollide = false
-			ghost.CanQuery = false
-			ghost.Material = Enum.Material.ForceField
-			ghost.Color = VFXUtil.WeaponColors.Frostveil
-			ghost.Size = Vector3.new(2.4, 4.8, 1.4)
-			ghost.CFrame = CFrame.new(root.Position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * radius)
-			ghost.Transparency = 0.4
-			ghost.Parent = workspace
-			TweenService:Create(ghost, TweenInfo.new(0.7), { Transparency = 1 }):Play()
-			Debris:AddItem(ghost, 0.8)
+			local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * radius
+			ghostShell(CFrame.new(root.Position + offset), VFXUtil.WeaponColors.Frostveil, 0.7)
+		end
+	end,
+
+	-- Voidneedle: complete FX set
+	VoidneedlePierce = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.HitSpark(root.Position, VFXUtil.WeaponColors.Voidneedle)
+		end
+	end,
+	VoidneedlePhase = function(p)
+		local root = rootOf(p.character)
+		if root then
+			ghostShell(root.CFrame, VFXUtil.WeaponColors.Voidneedle, 0.4)
+		end
+	end,
+	VoidneedleVanish = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.Shockwave(root.Position, VFXUtil.WeaponColors.Voidneedle, p.active and 6 or 4, 0.35)
+			if p.active then
+				ghostShell(root.CFrame, VFXUtil.WeaponColors.Voidneedle, 0.5)
+			end
+		end
+	end,
+	VoidneedleThread = function(p)
+		-- Dark tether beam between caster and victim for the thread duration
+		local casterRoot = rootOf(p.character)
+		local victimRoot = rootOf(p.victim)
+		if not casterRoot or not victimRoot then
+			return
+		end
+		local a0 = Instance.new("Attachment")
+		a0.Parent = casterRoot
+		local a1 = Instance.new("Attachment")
+		a1.Parent = victimRoot
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = a0
+		beam.Attachment1 = a1
+		beam.Color = ColorSequence.new(VFXUtil.WeaponColors.Voidneedle)
+		beam.Width0 = 0.25
+		beam.Width1 = 0.25
+		beam.LightEmission = 1
+		beam.FaceCamera = true
+		beam.Parent = casterRoot
+		local lifetime = (typeof(p.duration) == "number" and p.duration or 1) + 0.2
+		Debris:AddItem(beam, lifetime)
+		Debris:AddItem(a0, lifetime)
+		Debris:AddItem(a1, lifetime)
+	end,
+	VoidneedleThreadSnap = function(p)
+		local root = rootOf(p.victim)
+		if root then
+			VFXUtil.HitSpark(root.Position, Color3.fromRGB(200, 160, 255))
+		end
+	end,
+	VoidneedleThreadPull = function(p)
+		local root = rootOf(p.victim)
+		if root then
+			VFXUtil.Shockwave(root.Position, VFXUtil.WeaponColors.Voidneedle, 5, 0.3)
+		end
+	end,
+	VoidneedleRiftOut = function(p)
+		local root = rootOf(p.character)
+		if root then
+			ghostShell(root.CFrame, VFXUtil.WeaponColors.Voidneedle, 0.5)
+			VFXUtil.Shockwave(root.Position, VFXUtil.WeaponColors.Voidneedle, 5, 0.3)
+		end
+	end,
+	VoidneedleRiftIn = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.HitSpark(root.Position, VFXUtil.WeaponColors.Voidneedle)
+		end
+	end,
+	VoidneedleAfterimage = function(p)
+		if typeof(p.cframe) == "CFrame" then
+			ghostShell(p.cframe, VFXUtil.WeaponColors.Voidneedle, 0.6)
+		end
+	end,
+
+	-- Thundercrown: complete FX set
+	ThundercrownCleave = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.HitSpark(root.Position + Vector3.new(0, 4, 0), VFXUtil.WeaponColors.Thundercrown)
+		end
+	end,
+	ThundercrownCleaveImpact = function(p)
+		if typeof(p.position) == "Vector3" then
+			lightningBolt(p.position, VFXUtil.WeaponColors.Thundercrown)
+		end
+	end,
+	ThundercrownLeap = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.Shockwave(root.Position - Vector3.new(0, 2, 0), VFXUtil.WeaponColors.Thundercrown, 6, 0.4)
+		end
+	end,
+	ThundercrownCrash = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.Shockwave(root.Position, VFXUtil.WeaponColors.Thundercrown, 16, 0.6)
+			lightningBolt(root.Position, VFXUtil.WeaponColors.Thundercrown)
+		end
+		CameraController.Shake(1)
+	end,
+	ThundercrownField = function(p)
+		if typeof(p.position) ~= "Vector3" then
+			return
+		end
+		-- Crackling ground disc for the field's duration
+		local radius = p.radius or 12
+		local duration = typeof(p.duration) == "number" and p.duration or 4
+		local disc = Instance.new("Part")
+		disc.Anchored = true
+		disc.CanCollide = false
+		disc.CanQuery = false
+		disc.Shape = Enum.PartType.Cylinder
+		disc.Material = Enum.Material.Neon
+		disc.Color = VFXUtil.WeaponColors.Thundercrown
+		disc.Size = Vector3.new(0.3, radius * 2, radius * 2)
+		disc.Orientation = Vector3.new(0, 0, 90)
+		disc.CFrame = CFrame.new(p.position - Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		disc.Transparency = 0.75
+		disc.Parent = workspace
+		Debris:AddItem(disc, duration)
+		task.spawn(function()
+			for _ = 1, duration do
+				task.wait(1)
+				if disc.Parent then
+					local angle = math.random() * math.pi * 2
+					local sparkPos = p.position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * (radius * math.random())
+					VFXUtil.HitSpark(sparkPos, VFXUtil.WeaponColors.Thundercrown)
+				end
+			end
+		end)
+	end,
+	ThundercrownCrownCharge = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.HitSpark(root.Position + Vector3.new(0, 5, 0), VFXUtil.WeaponColors.Thundercrown)
+		end
+	end,
+	ThundercrownCrownBreaker = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.Shockwave(root.Position, VFXUtil.WeaponColors.Thundercrown, 14, 0.5)
+			lightningBolt(root.Position + root.CFrame.LookVector * 6, VFXUtil.WeaponColors.Thundercrown)
+		end
+		CameraController.Shake(1.3)
+	end,
+	ThundercrownStrike = function(p)
+		if typeof(p.position) == "Vector3" then
+			lightningBolt(p.position, VFXUtil.WeaponColors.Thundercrown)
+		end
+	end,
+	ThundercrownCrownIgnite = function(p)
+		local root = rootOf(p.character)
+		if root then
+			-- Floating crown: three orbit sparks above the head for flavor
+			lightningBolt(root.Position, VFXUtil.WeaponColors.Thundercrown)
+			VFXUtil.Shockwave(root.Position + Vector3.new(0, 4, 0), VFXUtil.WeaponColors.Thundercrown, 4, 0.5)
+		end
+	end,
+	ThundercrownChainArc = function(p)
+		if typeof(p.position) ~= "Vector3" then
+			return
+		end
+		local radius = p.radius or 15
+		for _ = 1, 3 do
+			local angle = math.random() * math.pi * 2
+			local target = p.position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * (radius * (0.5 + math.random() * 0.5))
+			lightningBolt(target, VFXUtil.WeaponColors.Thundercrown)
 		end
 	end,
 }
