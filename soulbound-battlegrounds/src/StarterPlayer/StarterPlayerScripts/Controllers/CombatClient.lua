@@ -3,6 +3,7 @@
 -- Adding a weapon = add its fx cases here (or a per-weapon VFX module later).
 -- Nothing in this file affects gameplay — it is pure presentation.
 
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -214,6 +215,147 @@ local fxHandlers: { [string]: (payload: any) -> () } = {
 		local root = rootOf(p.victim)
 		if root then
 			VFXUtil.HitSpark(root.Position, VFXUtil.WeaponColors.Ashfang)
+		end
+	end,
+
+	-- Frostveil: complete FX set (mirrors Ashfang's per-move coverage)
+	FrostveilIceCut = function(p)
+		-- Crescent wave: a flattened neon shard gliding forward
+		if typeof(p.origin) ~= "Vector3" then
+			return
+		end
+		local root = rootOf(p.character)
+		local look = root and root.CFrame.LookVector or Vector3.zAxis
+		local wave = Instance.new("Part")
+		wave.Anchored = true
+		wave.CanCollide = false
+		wave.CanQuery = false
+		wave.Material = Enum.Material.Neon
+		wave.Color = VFXUtil.WeaponColors.Frostveil
+		wave.Size = Vector3.new(7, 0.6, 1.2)
+		wave.CFrame = CFrame.lookAt(p.origin, p.origin + look)
+		wave.Transparency = 0.2
+		wave.Parent = workspace
+		local range = typeof(p.range) == "number" and p.range or 30
+		TweenService:Create(wave, TweenInfo.new(0.4, Enum.EasingStyle.Linear), {
+			CFrame = wave.CFrame * CFrame.new(0, 0, -range),
+			Transparency = 0.7,
+		}):Play()
+		task.delay(0.45, function()
+			wave:Destroy()
+		end)
+	end,
+	FrostveilIceShatter = function(p)
+		if typeof(p.position) == "Vector3" then
+			VFXUtil.HitSpark(p.position, VFXUtil.WeaponColors.Frostveil)
+		end
+	end,
+	FrostveilFrozenStep = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.Shockwave(root.Position - Vector3.new(0, 2, 0), VFXUtil.WeaponColors.Frostveil, 5, 0.3)
+		end
+	end,
+	FrostveilMirrorPlace = function(p)
+		if typeof(p.position) == "Vector3" then
+			VFXUtil.HitSpark(p.position, Color3.fromRGB(220, 245, 255))
+		end
+	end,
+	FrostveilMirrorSpring = function(p)
+		if typeof(p.position) == "Vector3" then
+			VFXUtil.Shockwave(p.position, VFXUtil.WeaponColors.Frostveil, 8, 0.5)
+		end
+		CameraController.Shake(0.5)
+	end,
+	FrostveilCrystalCharge = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.HitSpark(root.Position, VFXUtil.WeaponColors.Frostveil)
+		end
+	end,
+	FrostveilCrystalBurst = function(p)
+		local root = rootOf(p.character)
+		if root then
+			VFXUtil.Shockwave(root.Position, VFXUtil.WeaponColors.Frostveil, (p.radius or 14), 0.6)
+			-- Spike ring: 8 ice shards jutting outward
+			for i = 1, 8 do
+				local angle = (i / 8) * math.pi * 2
+				local spike = Instance.new("Part")
+				spike.Anchored = true
+				spike.CanCollide = false
+				spike.CanQuery = false
+				spike.Material = Enum.Material.Ice
+				spike.Color = VFXUtil.WeaponColors.Frostveil
+				spike.Size = Vector3.new(1, 4, 1)
+				spike.CFrame = CFrame.new(root.Position)
+					* CFrame.Angles(0, angle, 0)
+					* CFrame.new(0, -2, -6)
+					* CFrame.Angles(math.rad(30), 0, 0)
+				spike.Parent = workspace
+				TweenService:Create(spike, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+					CFrame = spike.CFrame * CFrame.new(0, 2.5, 0),
+				}):Play()
+				task.delay(0.9, function()
+					TweenService:Create(spike, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+					task.delay(0.45, function()
+						spike:Destroy()
+					end)
+				end)
+			end
+		end
+		CameraController.Shake(0.8)
+	end,
+	FrostveilDomeStart = function(p)
+		if typeof(p.position) ~= "Vector3" then
+			return
+		end
+		VFXUtil.Shockwave(p.position, VFXUtil.WeaponColors.Frostveil, p.radius or 30, 1)
+		-- Translucent dome shell for the ultimate's duration
+		local dome = Instance.new("Part")
+		dome.Name = "WinterDome"
+		dome.Anchored = true
+		dome.CanCollide = false
+		dome.CanQuery = false
+		dome.Shape = Enum.PartType.Ball
+		dome.Material = Enum.Material.ForceField
+		dome.Color = VFXUtil.WeaponColors.Frostveil
+		dome.Size = Vector3.one * ((p.radius or 30) * 2)
+		dome.CFrame = CFrame.new(p.position)
+		dome.Transparency = 0.85
+		dome.Parent = workspace
+		task.delay(typeof(p.duration) == "number" and p.duration or 18, function()
+			TweenService:Create(dome, TweenInfo.new(0.6), { Transparency = 1, Size = Vector3.one }):Play()
+			task.delay(0.7, function()
+				dome:Destroy()
+			end)
+		end)
+	end,
+	FrostveilDomePulse = function(p)
+		if typeof(p.position) == "Vector3" then
+			VFXUtil.Shockwave(p.position - Vector3.new(0, 2, 0), VFXUtil.WeaponColors.Frostveil, (p.radius or 30) * 0.6, 0.8)
+		end
+	end,
+	FrostveilCloneFlicker = function(p)
+		-- Ghost clones blink at the dome edge: cheap illusion via neon shells
+		local root = rootOf(p.character)
+		if not root then
+			return
+		end
+		local radius = (p.radius or 30) * 0.8
+		for _ = 1, 3 do
+			local angle = math.random() * math.pi * 2
+			local ghost = Instance.new("Part")
+			ghost.Anchored = true
+			ghost.CanCollide = false
+			ghost.CanQuery = false
+			ghost.Material = Enum.Material.ForceField
+			ghost.Color = VFXUtil.WeaponColors.Frostveil
+			ghost.Size = Vector3.new(2.4, 4.8, 1.4)
+			ghost.CFrame = CFrame.new(root.Position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * radius)
+			ghost.Transparency = 0.4
+			ghost.Parent = workspace
+			TweenService:Create(ghost, TweenInfo.new(0.7), { Transparency = 1 }):Play()
+			Debris:AddItem(ghost, 0.8)
 		end
 	end,
 }

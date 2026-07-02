@@ -15,7 +15,7 @@ An original anime-battlegrounds game for Roblox. Players are **Spirit Hunters** 
 | `default.project.json` | [Rojo](https://rojo.space) project mapping |
 | `src/ReplicatedStorage/Modules/` | Shared core: Net, CombatConstants, Hitbox, Cooldowns, Stun, Ragdoll, StatusEffects, VFXUtil, WeaponConfigs |
 | `src/ServerScriptService/Services/` | Server: Data, Progression, Combat, Ability, SoulClash, SpiritEcho, Destruction, TrainingDummy, Admin |
-| `src/ServerScriptService/Abilities/` | Weapon movesets — **Ashfang is the complete reference**, others are working templates |
+| `src/ServerScriptService/Abilities/` | Weapon movesets — **Ashfang and Frostveil are complete**; Voidneedle and Thundercrown are working templates |
 | `src/StarterPlayer/.../Controllers/` | Client: Input, CombatClient (VFX), Camera, UI |
 
 ## Getting started
