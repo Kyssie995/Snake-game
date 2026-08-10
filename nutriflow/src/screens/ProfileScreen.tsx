@@ -1,0 +1,408 @@
+import React, { useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, Modal, Alert } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { signOut } from 'firebase/auth';
+import { auth } from '../config/firebase';
+import { useTheme, useIsDark } from '../hooks/useTheme';
+import { useStore } from '../store';
+import { t } from '../i18n';
+import { BorderRadius, FontSize, FontWeight, Spacing } from '../constants/theme';
+import EditGoalsScreen from './EditGoalsScreen';
+import SubscriptionScreen from './SubscriptionScreen';
+import MealPlanScreen from './MealPlanScreen';
+import ShoppingListScreen from './ShoppingListScreen';
+import ChallengesScreen from './ChallengesScreen';
+import DataExportScreen from './DataExportScreen';
+import HealthIntegrationsScreen from './HealthIntegrationsScreen';
+import PrivacyScreen from './PrivacyScreen';
+import AboutScreen from './AboutScreen';
+
+export default function ProfileScreen() {
+  const theme = useTheme();
+  const isDark = useIsDark();
+  const navigation = useNavigation<any>();
+  const profile = useStore(s => s.profile);
+  const goals = useStore(s => s.goals);
+  const settings = useStore(s => s.settings);
+  const updateSettings = useStore(s => s.updateSettings);
+  const streak = useStore(s => s.streak);
+
+  const resetStore = useStore(s => s.resetStore);
+  const lang = settings.language;
+
+  const [showEditGoals, setShowEditGoals] = useState(false);
+  const [showSubscription, setShowSubscription] = useState(false);
+  const [showMealPlan, setShowMealPlan] = useState(false);
+  const [showShoppingList, setShowShoppingList] = useState(false);
+  const [showChallenges, setShowChallenges] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+
+  const toggleTheme = () => {
+    updateSettings({ theme: isDark ? 'light' : 'dark' });
+  };
+
+  const toggleLanguage = () => {
+    updateSettings({ language: settings.language === 'de' ? 'en' : 'de' });
+  };
+
+  const tierLabels: Record<string, string> = {
+    free: t('profile.free'),
+    student: t('profile.student'),
+    premium: t('profile.premium'),
+    lifetime: t('profile.lifetime'),
+  };
+
+  return (
+    <>
+      <ScrollView
+        style={[styles.container, { backgroundColor: theme.background }]}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.title, { color: theme.text }]}>{t('profile.title')}</Text>
+
+        <View style={[styles.profileCard, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <View style={[styles.avatar, { backgroundColor: theme.primary + '20' }]}>
+            <Text style={[styles.avatarText, { color: theme.primary }]}>
+              {(profile?.name || 'N')[0].toUpperCase()}
+            </Text>
+          </View>
+          <Text style={[styles.profileName, { color: theme.text }]}>{profile?.name || 'NutriFlow'}</Text>
+          <TouchableOpacity
+            style={[styles.tierBadge, { backgroundColor: theme.primary + '15' }]}
+            onPress={() => setShowSubscription(true)}
+          >
+            <Text style={[styles.tierText, { color: theme.primary }]}>
+              {tierLabels[settings.subscription]}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.profileStats}>
+            <View style={styles.profileStat}>
+              <Text style={[styles.profileStatValue, { color: theme.text }]}>{streak.currentStreak}</Text>
+              <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>Streak</Text>
+            </View>
+            <View style={[styles.profileStatDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.profileStat}>
+              <Text style={[styles.profileStatValue, { color: theme.text }]}>{profile?.currentWeight || '—'}</Text>
+              <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>kg</Text>
+            </View>
+            <View style={[styles.profileStatDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.profileStat}>
+              <Text style={[styles.profileStatValue, { color: theme.text }]}>{goals.calories}</Text>
+              <Text style={[styles.profileStatLabel, { color: theme.textTertiary }]}>kcal</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.goals')}</Text>
+            <TouchableOpacity onPress={() => setShowEditGoals(true)}>
+              <Text style={[styles.editBtn, { color: theme.primary }]}>{t('common.edit')}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.calories')}</Text>
+            <Text style={[styles.goalValue, { color: theme.text }]}>{goals.calories} kcal</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.protein')}</Text>
+            <Text style={[styles.goalValue, { color: theme.protein }]}>{goals.protein}g</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.carbs')}</Text>
+            <Text style={[styles.goalValue, { color: theme.carbs }]}>{goals.carbs}g</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.fat')}</Text>
+            <Text style={[styles.goalValue, { color: theme.fat }]}>{goals.fat}g</Text>
+          </View>
+          <View style={styles.goalRow}>
+            <Text style={[styles.goalLabel, { color: theme.textSecondary }]}>{t('dashboard.water')}</Text>
+            <Text style={[styles.goalValue, { color: theme.water }]}>{goals.water}L</Text>
+          </View>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.settings')}</Text>
+
+          <View style={styles.settingRow}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.theme')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {isDark ? t('profile.darkMode') : t('profile.lightMode')}
+              </Text>
+            </View>
+            <Switch
+              value={isDark}
+              onValueChange={toggleTheme}
+              trackColor={{ false: theme.surfaceSecondary, true: theme.primary + '50' }}
+              thumbColor={isDark ? theme.primary : theme.textTertiary}
+            />
+          </View>
+
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.settingRow} onPress={toggleLanguage}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.language')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {settings.language === 'de' ? 'Deutsch' : 'English'}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowSubscription(true)}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.subscription')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {tierLabels[settings.subscription]}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            {settings.language === 'de' ? 'Premium Features' : 'Premium Features'}
+          </Text>
+          <TouchableOpacity style={styles.featureRow} onPress={() => setShowMealPlan(true)}>
+            <Text style={styles.featureIcon}>📅</Text>
+            <View style={styles.featureInfo}>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>
+                {settings.language === 'de' ? 'Mahlzeitenplanung' : 'Meal Planning'}
+              </Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {settings.language === 'de' ? 'Woche im Voraus planen' : 'Plan your week ahead'}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.featureRow} onPress={() => setShowShoppingList(true)}>
+            <Text style={styles.featureIcon}>🛒</Text>
+            <View style={styles.featureInfo}>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>
+                {settings.language === 'de' ? 'Einkaufsliste' : 'Shopping List'}
+              </Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {settings.language === 'de' ? 'Zutaten organisieren' : 'Organize ingredients'}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.featureRow} onPress={() => setShowChallenges(true)}>
+            <Text style={styles.featureIcon}>🏆</Text>
+            <View style={styles.featureInfo}>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>Challenges</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {settings.language === 'de' ? 'Badges verdienen' : 'Earn badges'}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.featureRow} onPress={() => setShowHealth(true)}>
+            <Text style={styles.featureIcon}>❤️</Text>
+            <View style={styles.featureInfo}>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>
+                {settings.language === 'de' ? 'Health Integrationen' : 'Health Integrations'}
+              </Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>
+                {settings.language === 'de' ? 'Apple Health, Google Fit' : 'Apple Health, Google Fit'}
+              </Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => navigation.navigate('Stats')}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('stats.title')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowExport(true)}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.export')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowPrivacy(true)}>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.privacy')}</Text>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => setShowAbout(true)}>
+            <View>
+              <Text style={[styles.settingLabel, { color: theme.text }]}>{t('profile.about')}</Text>
+              <Text style={[styles.settingDesc, { color: theme.textTertiary }]}>NutriFlow v1.0.0</Text>
+            </View>
+            <Text style={[styles.settingChevron, { color: theme.textTertiary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.surface, shadowColor: theme.cardShadow }]}>
+          <View style={styles.settingRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 16 }}>☁️</Text>
+              <View>
+                <Text style={[styles.settingLabel, { color: theme.text }]}>Cloud Sync</Text>
+                <Text style={[styles.settingDesc, { color: theme.primary }]}>
+                  {auth.currentUser?.email || ''}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.settingDesc, { color: theme.primary }]}>
+              {lang === 'de' ? 'Aktiv' : 'Active'} ✓
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.logoutBtn, { borderColor: theme.accent }]}
+          onPress={() => {
+            Alert.alert(
+              lang === 'de' ? 'Abmelden' : 'Logout',
+              lang === 'de' ? 'Möchtest du dich wirklich abmelden?' : 'Are you sure you want to logout?',
+              [
+                { text: lang === 'de' ? 'Abbrechen' : 'Cancel', style: 'cancel' },
+                {
+                  text: lang === 'de' ? 'Abmelden' : 'Logout',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await resetStore();
+                    await signOut(auth);
+                  },
+                },
+              ]
+            );
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.logoutText, { color: theme.accent }]}>
+            {lang === 'de' ? 'Abmelden' : 'Logout'}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 100 }} />
+      </ScrollView>
+
+      <EditGoalsScreen visible={showEditGoals} onClose={() => setShowEditGoals(false)} />
+
+      <Modal visible={showSubscription} animationType="slide" presentationStyle="pageSheet">
+        <SubscriptionScreen onClose={() => setShowSubscription(false)} />
+      </Modal>
+
+      <MealPlanScreen visible={showMealPlan} onClose={() => setShowMealPlan(false)} />
+      <ShoppingListScreen visible={showShoppingList} onClose={() => setShowShoppingList(false)} />
+      <ChallengesScreen visible={showChallenges} onClose={() => setShowChallenges(false)} />
+      <DataExportScreen visible={showExport} onClose={() => setShowExport(false)} />
+      <HealthIntegrationsScreen visible={showHealth} onClose={() => setShowHealth(false)} />
+      <PrivacyScreen visible={showPrivacy} onClose={() => setShowPrivacy(false)} />
+      <AboutScreen visible={showAbout} onClose={() => setShowAbout(false)} />
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  content: { padding: Spacing.lg, paddingTop: Spacing.xxl },
+  title: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold, marginBottom: Spacing.lg },
+  profileCard: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xxl,
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  avatarText: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold },
+  profileName: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, marginBottom: Spacing.sm },
+  tierBadge: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, borderRadius: BorderRadius.full },
+  tierText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
+  profileStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.xl,
+    gap: Spacing.xl,
+  },
+  profileStat: { alignItems: 'center' },
+  profileStatValue: { fontSize: FontSize.xl, fontWeight: FontWeight.bold },
+  profileStatLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.medium, marginTop: 2 },
+  profileStatDivider: { width: 1, height: 28 },
+  section: {
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  sectionTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.semibold, marginBottom: Spacing.lg },
+  editBtn: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  goalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+  },
+  goalLabel: { fontSize: FontSize.sm },
+  goalValue: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+  },
+  settingLabel: { fontSize: FontSize.md, fontWeight: FontWeight.medium },
+  settingDesc: { fontSize: FontSize.xs, marginTop: 2 },
+  settingChevron: { fontSize: 22, fontWeight: FontWeight.medium },
+  settingDivider: { height: StyleSheet.hairlineWidth },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+  },
+  featureIcon: { fontSize: 24, width: 32, textAlign: 'center' },
+  featureInfo: { flex: 1 },
+  logoutBtn: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1.5,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    marginTop: Spacing.md,
+  },
+  logoutText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semibold,
+  },
+});
