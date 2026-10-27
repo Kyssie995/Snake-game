@@ -249,6 +249,30 @@ function Fakes.install(): Fakes
 			return instanceSignal(self, eventName)
 		end)
 	end
+	-- GUI events (fire only when a test fires them via fakes:signalFor(inst, name):Fire(...))
+	local guiEvents = {
+		GuiObject = { "InputBegan", "InputChanged", "InputEnded", "MouseEnter", "MouseLeave", "MouseMoved", "MouseWheelForward", "MouseWheelBackward", "SelectionGained", "SelectionLost" },
+		GuiButton = { "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up", "MouseButton2Click", "MouseButton2Down", "MouseButton2Up" },
+		TextBox = { "FocusLost", "Focused", "ReturnPressedFromOnScreenKeyboard" },
+		Path2D = { "ControlPointChanged" },
+	}
+	for className, events in guiEvents do
+		for _, eventName in events do
+			roblox.implementProperty(className, eventName, function(self)
+				return instanceSignal(self, eventName)
+			end)
+		end
+	end
+	local focused: { [any]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+	roblox.implementMethod("TextBox", "CaptureFocus", function(self)
+		focused[self] = true
+	end)
+	roblox.implementMethod("TextBox", "ReleaseFocus", function(self)
+		focused[self] = nil
+	end)
+	roblox.implementMethod("TextBox", "IsFocused", function(self)
+		return focused[self] == true
+	end)
 	roblox.implementMethod("Instance", "GetPropertyChangedSignal", function(self, property: string)
 		return instanceSignal(self, "Changed:" .. property)
 	end)

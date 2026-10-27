@@ -15,6 +15,7 @@ local stdio = require("@lune/stdio")
 
 local Loader = require("./Loader")
 local Fakes = require("./Fakes")
+local PluginFakes = require("./PluginFakes")
 
 local filter: string? = nil
 local verbose = false
@@ -28,6 +29,9 @@ end
 
 local fakes = Fakes.install()
 local loader = Loader.new(process.cwd)
+-- Studio-only globals used by plugin code (stand-ins, see PluginFakes)
+loader.globals.DockWidgetPluginGuiInfo = PluginFakes.DockWidgetPluginGuiInfo
+loader.globals.TweenInfo = PluginFakes.TweenInfo
 local TestFramework = loader:use("Tests.Framework")
 
 local specs = {}
@@ -56,7 +60,7 @@ end)
 
 local report = TestFramework.run(specs, function(path: string)
 	return loader:use(path)
-end, { environment = "lune", fakes = fakes, loader = loader }, filter)
+end, { environment = "lune", fakes = fakes, loader = loader, plugin = PluginFakes }, filter)
 
 local text = TestFramework.format(report, verbose)
 if report.failed > 0 then
