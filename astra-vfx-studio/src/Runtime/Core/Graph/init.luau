@@ -21,7 +21,8 @@
 	      Tween / SetProperty "value" param takes kind, range and default from the target channel)
 	  Graph.pinKind(graph, def, ref) -> PinKind?   effective kind of a pin ("value" follows the channel)
 	  run() returns a second value (RunInfo); the list's `truncated` flag is list.truncated (see Runner).
-	  Graph.MAX_WORK   per-run work budget that bounds unrolling of malformed (cyclic) graphs
+	  Graph.MAX_WORK / Graph.MAX_PENDING   per-run work budget and queue bound (pathological nesting; cycles of
+	      unvalidated graphs are already removed by compile())
 ]]
 
 local Model = require(script.Model)

@@ -28,7 +28,8 @@
 	    all consumers see the same value (e.g. one RandomNumber shared by Emit.count and Delay.seconds); a new
 	    iteration gets new values. Loop.index read outside the loop's body is 0. (Data cycles cannot occur:
 	    compile() drops them; the evaluator would also fall back to the param on a cycle.)
-	  * Unlinked data inputs fall back to the param with the same name, then the param default. Numbers coming
+	  * Unlinked data inputs fall back to the param with the same name, then the param default (a linked
+	    target that yields an empty component id also falls back to the target param). Numbers coming
 	    through links are clamped to the param's declared range (integers rounded); non-finite values use the
 	    param. Math results that are not finite (div by 0, pow of a negative base) are 0.
 	  * Random values are deterministic per (seed, cycle, trigger, node id, invocation index): every evaluation of
