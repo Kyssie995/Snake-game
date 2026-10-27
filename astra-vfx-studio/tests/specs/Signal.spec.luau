@@ -1,0 +1,65 @@
+--!strict
+return function(T: any, use: (string) -> any, _ctx: any)
+	local Signal = use("AstraVFX.Core.Signal")
+
+	T.describe("Signal", function()
+		T.it("fires handlers in connection order with arguments", function()
+			local s = Signal.new()
+			local log = {}
+			s:Connect(function(a: string, b: string)
+				table.insert(log, "1:" .. a .. b)
+			end)
+			s:Connect(function(a: string, b: string)
+				table.insert(log, "2:" .. a .. b)
+			end)
+			s:Fire("x", "y")
+			T.expect(log).toEqual({ "1:xy", "2:xy" })
+		end)
+		T.it("disconnects, including during firing", function()
+			local s = Signal.new()
+			local count = 0
+			local c2
+			s:Connect(function()
+				count += 1
+				c2:Disconnect()
+			end)
+			c2 = s:Connect(function()
+				count += 100
+			end)
+			s:Fire()
+			T.expect(count).toBe(1)
+			T.expect(c2.Connected).toBe(false)
+			T.expect(s:count()).toBe(1)
+		end)
+		T.it("Once fires a single time", function()
+			local s = Signal.new()
+			local n = 0
+			s:Once(function()
+				n += 1
+			end)
+			s:Fire()
+			s:Fire()
+			T.expect(n).toBe(1)
+			T.expect(s:count()).toBe(0)
+		end)
+		T.it("isolates handler errors", function()
+			local s = Signal.new()
+			local reached = false
+			s:Connect(function()
+				error("bad listener")
+			end)
+			s:Connect(function()
+				reached = true
+			end)
+			s:Fire()
+			T.expect(reached).toBe(true)
+		end)
+		T.it("DisconnectAll removes every connection", function()
+			local s = Signal.new()
+			local c = s:Connect(function() end)
+			s:DisconnectAll()
+			T.expect(c.Connected).toBe(false)
+			T.expect(s:count()).toBe(0)
+		end)
+	end)
+end
