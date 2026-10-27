@@ -560,6 +560,12 @@ CANON.numberSequence = function(ctx: Ctx, v: any): any
 	if type(v) == "number" then
 		return canonLimitedFloat(ctx, v, "value")
 	end
+	if type(v) == "table" and type(v[1]) == "number" then
+		return fail(
+			"expected a number or keypoints [[time, value, envelope?], ...], got a flat array"
+				.. " (wrap each keypoint in its own array)"
+		)
+	end
 	local len = keypointCount(ctx, v, "a number or keypoints [[time, value, envelope?], ...]")
 	local out = {}
 	local previous = 0
@@ -594,6 +600,9 @@ CANON.numberSequence = function(ctx: Ctx, v: any): any
 end
 
 CANON.colorSequence = function(ctx: Ctx, v: any): any
+	if type(v) == "table" and type(v[1]) == "number" and arrayLength(v) == 2 and type(v[2]) ~= "number" then
+		return fail("expected a colour or keypoints [[time, colour], ...], got a single [time, colour] pair")
+	end
 	if type(v) == "string" or (type(v) == "table" and type(v[1]) == "number") then
 		return canonColor(v, "")
 	end
@@ -645,7 +654,7 @@ CANON.componentRef = function(_ctx: Ctx, v: any): any
 		return fail(
 			"invalid component id "
 				.. describe(v)
-				.. ' (1-'
+				.. " (1-"
 				.. Constants.ID_MAX_LENGTH
 				.. ' letters, digits, "_" or "-"; "" for none)'
 		)

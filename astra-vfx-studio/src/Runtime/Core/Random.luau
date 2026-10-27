@@ -43,9 +43,11 @@ local FNV_OFFSET = 2166136261
 local FNV_PRIME = 16777619
 local SEPARATOR = 0x1F
 
-local bxor = bit32.bxor
-local bor = bit32.bor
-local rshift = bit32.rshift
+-- Builtins as locals (still compiled as builtin fast calls; no global lookups in custom environments).
+local bxor, bor, rshift = bit32.bxor, bit32.bor, bit32.rshift
+local floor, ceil, sqrt, abs = math.floor, math.ceil, math.sqrt, math.abs
+local byte = string.byte
+local newVector3 = Vector3.new
 
 -- (a * b) mod 2^32 for a, b in [0, 2^32), exact (all intermediate products stay below 2^53).
 local function imul(a: number, b: number): number
@@ -93,7 +95,7 @@ function Random.hash(...: string | number): number
 		end
 		local text = partText(parts[i])
 		for j = 1, #text do
-			h = imul(bxor(h, string.byte(text, j)), FNV_PRIME)
+			h = imul(bxor(h, byte(text, j)), FNV_PRIME)
 		end
 	end
 	return h
@@ -105,7 +107,7 @@ function Random.new(seed: number?): Rng
 	local value: any = seed
 	if value == nil then
 		s = 0
-	elseif type(value) == "number" and value == value and math.abs(value) < TWO_53 and value % 1 == 0 then
+	elseif type(value) == "number" and value == value and abs(value) < TWO_53 and value % 1 == 0 then
 		s = value % TWO_32
 	else
 		s = Random.hash(value)
@@ -133,14 +135,14 @@ function Rng.int(self: Rng, min: number, max: number): number
 	if lo > hi then
 		lo, hi = hi, lo
 	end
-	lo, hi = math.ceil(lo), math.floor(hi)
+	lo, hi = ceil(lo), floor(hi)
 	if lo ~= lo or hi ~= hi or lo == -math.huge or hi == math.huge then
 		error("Random:int: bounds must be finite numbers (got " .. tostring(min) .. ", " .. tostring(max) .. ")", 2)
 	end
 	if lo > hi then
 		error("Random:int: no integer between " .. tostring(min) .. " and " .. tostring(max), 2)
 	end
-	return math.min(hi, lo + math.floor(self:next() * (hi - lo + 1)))
+	return math.min(hi, lo + floor(self:next() * (hi - lo + 1)))
 end
 
 -- -1 or 1 with equal probability.
@@ -155,11 +157,11 @@ function Rng.unitVector(self: Rng): Vector3
 		local y = 2 * self:next() - 1
 		local s = x * x + y * y
 		if s < 1 then
-			local f = 2 * math.sqrt(1 - s)
-			return Vector3.new(x * f, y * f, 1 - 2 * s)
+			local f = 2 * sqrt(1 - s)
+			return newVector3(x * f, y * f, 1 - 2 * s)
 		end
 	end
-	return Vector3.new(0, 1, 0) -- unreachable in practice (probability ~1e-43)
+	return newVector3(0, 1, 0) -- unreachable in practice (probability ~1e-43)
 end
 
 -- Uniform point on the unit circle (rejection sampling, no trigonometry).
@@ -169,7 +171,7 @@ local function unitCircle(self: Rng): (number, number)
 		local y = 2 * self:next() - 1
 		local s = x * x + y * y
 		if s < 1 and s > 1e-12 then
-			local inv = 1 / math.sqrt(s)
+			local inv = 1 / sqrt(s)
 			return x * inv, y * inv
 		end
 	end
@@ -188,8 +190,8 @@ function Rng.inCone(self: Rng, direction: Vector3, angleDeg: number): Vector3
 	-- cos(theta) uniform in [cos(angle), 1] gives a uniform distribution over the cap's area.
 	local z = 1 - self:next() * (1 - cosAngle)
 	local cx, cy = unitCircle(self)
-	local r = math.sqrt(math.max(0, 1 - z * z))
-	local helper = if math.abs(d.Y) < 0.9 then Vector3.new(0, 1, 0) else Vector3.new(1, 0, 0)
+	local r = sqrt(math.max(0, 1 - z * z))
+	local helper = if abs(d.Y) < 0.9 then newVector3(0, 1, 0) else newVector3(1, 0, 0)
 	local u = helper:Cross(d).Unit
 	local v = d:Cross(u)
 	return u * (r * cx) + v * (r * cy) + d * z

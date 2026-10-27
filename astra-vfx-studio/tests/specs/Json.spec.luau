@@ -7,6 +7,11 @@ return function(T: any, use: (string) -> any, _ctx: any)
 	local NULL = Json.NULL
 	local EMPTY = Json.EMPTY_OBJECT
 
+	-- Builds a heterogeneous array (keeps the type checker from inferring a single element type).
+	local function list(...: any): { any }
+		return { ... }
+	end
+
 	-- Returns the error message of a failing decode (and asserts that it failed).
 	local function decodeError(text: string): string
 		local ok, err = Json.decode(text)
@@ -38,46 +43,43 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			seed = 42,
 			palette = { primary = "#8040FF", accent = "#FFFFFF" },
 			markers = { { id = "m1", time = 0.25, label = "Impact", event = "Impact", phase = "impact" } },
-			components = {
-				{
-					id = "core",
-					name = "Core Flash",
-					type = "flash",
-					startTime = 0,
-					duration = 0.4,
-					transform = { position = { 0, 1.5, 0 }, rotation = { 0, 45, 0 }, scale = 1 },
-					properties = { color = "$primary", size = 4, brightness = 2.75 },
-					tracks = {
-						{
-							id = "t1",
-							channel = "transparency",
-							keyframes = {
-								{ time = 0, value = 1, easing = "Quad.Out" },
-								{ time = 0.1, value = 0 },
-								{ time = 0.4, value = 1, easing = { bezier = { 0.25, 0.1, 0.25, 1 } } },
-							},
+			components = list({
+				id = "core",
+				name = "Core Flash",
+				type = "flash",
+				startTime = 0,
+				duration = 0.4,
+				transform = { position = { 0, 1.5, 0 }, rotation = { 0, 45, 0 }, scale = 1 },
+				properties = { color = "$primary", size = 4, brightness = 2.75 },
+				tracks = {
+					{
+						id = "t1",
+						channel = "transparency",
+						keyframes = {
+							{ time = 0, value = 1, easing = "Quad.Out" } :: any,
+							{ time = 0.1, value = 0 } :: any,
+							{ time = 0.4, value = 1, easing = { bezier = { 0.25, 0.1, 0.25, 1 } } } :: any,
 						},
 					},
-					events = { { id = "e1", time = 0, action = "emit", count = 24 } },
 				},
-				{
-					id = "sparks",
-					name = "Sparks",
-					type = "particles",
-					parent = "core",
-					enabled = true,
-					properties = {
-						size = { { 0, 0.5, 0.1 }, { 0.5, 1 }, { 1, 0 } },
-						color = { { 0, "#FFFFFF" }, { 1, "$primary" } },
-						lifetime = { 0.3, 0.6 },
-						rate = 0,
-						speed = -25.125,
-						extra = EMPTY,
-						list = {},
-					},
-					qualityOverrides = { Low = { rate = 0 } },
+				events = { { id = "e1", time = 0, action = "emit", count = 24 } },
+			}, {
+				id = "sparks",
+				name = "Sparks",
+				type = "particles",
+				parent = "core",
+				enabled = true,
+				properties = {
+					size = { { 0, 0.5, 0.1 }, { 0.5, 1 }, { 1, 0 } },
+					color = { list(0, "#FFFFFF"), list(1, "$primary") },
+					lifetime = { 0.3, 0.6 },
+					rate = 0,
+					speed = -25.125,
+					extra = EMPTY,
+					list = {},
 				},
-			},
+				qualityOverrides = { Low = { rate = 0 } },
+			}),
 			graph = { nodes = { { id = "n1", type = "OnPlay", position = { 100, 200 } } }, links = {} },
 			metadata = { author = "ASTRA", nested = { deep = { values = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } } } },
 		}
@@ -349,21 +351,21 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			T.it("puts arrays of up to 8 scalars on one line", function()
 				T.expect(Json.encode({ 1, 2, 3 })).toBe("[1, 2, 3]")
 				T.expect(Json.encode({ 1, 2, 3, 4, 5, 6, 7, 8 })).toBe("[1, 2, 3, 4, 5, 6, 7, 8]")
-				T.expect(Json.encode({ "a", true, NULL, 1.5 })).toBe('["a", true, null, 1.5]')
+				T.expect(Json.encode(list("a", true, NULL, 1.5))).toBe('["a", true, null, 1.5]')
 			end)
 			T.it("puts longer scalar arrays one element per line", function()
-				T.expect(Json.encode({ 1, 2, 3, 4, 5, 6, 7, 8, 9 })).toBe("[\n  1,\n  2,\n  3,\n  4,\n  5,\n  6,\n  7,\n  8,\n  9\n]")
+				T.expect(Json.encode({ 1, 2, 3, 4, 5, 6, 7, 8, 9 }))
+					.toBe("[\n  1,\n  2,\n  3,\n  4,\n  5,\n  6,\n  7,\n  8,\n  9\n]")
 			end)
 			T.it("prints arrays of short scalar arrays one element per line", function()
 				T.expect(Json.encode({ { 0, 1 }, { 1, 0 } })).toBe("[\n  [0, 1],\n  [1, 0]\n]")
-				T.expect(Json.encode({ v = { { 0, "#FFFFFF" }, { 1, "#000000" } } })).toBe(
-					'{\n  "v": [\n    [0, "#FFFFFF"],\n    [1, "#000000"]\n  ]\n}'
-				)
+				T.expect(Json.encode({ v = { list(0, "#FFFFFF"), list(1, "#000000") } }))
+					.toBe('{\n  "v": [\n    [0, "#FFFFFF"],\n    [1, "#000000"]\n  ]\n}')
 			end)
 			T.it("expands arrays containing containers", function()
 				T.expect(Json.encode({ { a = 1 } })).toBe('[\n  {\n    "a": 1\n  }\n]')
-				T.expect(Json.encode({ 1, { 2 } })).toBe("[\n  1,\n  [2]\n]")
-				T.expect(Json.encode({ 1, {} })).toBe("[\n  1,\n  []\n]")
+				T.expect(Json.encode(list(1, { 2 }))).toBe("[\n  1,\n  [2]\n]")
+				T.expect(Json.encode(list(1, {}))).toBe("[\n  1,\n  []\n]")
 				T.expect(Json.encode({ EMPTY })).toBe("[\n  {}\n]")
 			end)
 			T.it("matches the golden layout of a realistic effect document", function()
@@ -405,7 +407,10 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			T.it("uses Constants.KEY_ORDER first, then byte-wise alphabetical order", function()
 				local s = Json.encode({ zeta = 1, alpha = 2, name = 3, id = 4, schemaVersion = 5 }, { pretty = false })
 				T.expect(s).toBe('{"schemaVersion":5,"id":4,"name":3,"alpha":2,"zeta":1}')
-				local cased = Json.encode({ b = 1, B = 2, a = 3, aa = 4, ab = 5, ["ä"] = 6, _x = 7 }, { pretty = false })
+				local cased = Json.encode(
+					{ b = 1, B = 2, a = 3, aa = 4, ab = 5, ["ä"] = 6, _x = 7 },
+					{ pretty = false }
+				)
 				T.expect(cased).toBe('{"B":2,"_x":7,"a":3,"aa":4,"ab":5,"b":1,"ä":6}')
 			end)
 			T.it("orders every key of KEY_ORDER by its position", function()
@@ -421,9 +426,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			end)
 			T.it("accepts a custom key order (and an empty one)", function()
 				local value = { a = 1, z = 2, id = 3, m = 4 }
-				T.expect(Json.encode(value, { pretty = false, keyOrder = { "z", "m", "z" } })).toBe(
-					'{"z":2,"m":4,"a":1,"id":3}'
-				)
+				T.expect(Json.encode(value, { pretty = false, keyOrder = { "z", "m", "z" } }))
+					.toBe('{"z":2,"m":4,"a":1,"id":3}')
 				T.expect(Json.encode(value, { pretty = false, keyOrder = {} })).toBe('{"a":1,"id":3,"m":4,"z":2}')
 			end)
 			T.it("is independent of table insertion order", function()
@@ -453,8 +457,10 @@ return function(T: any, use: (string) -> any, _ctx: any)
 
 		T.describe("invalid input", function()
 			T.it("rejects mixed tables", function()
+				local mixed: any = { 1, 2 }
+				mixed.x = 3
 				T.expect(function()
-					Json.encode({ components = { { 1, 2, x = 3 } } })
+					Json.encode({ components = { mixed } })
 				end).toThrow("mixed table (array indices and string keys) at components[1]")
 			end)
 			T.it("rejects sparse arrays", function()
@@ -484,7 +490,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 					Json.encode({ components = { {}, { position = Vector3.new(1, 2, 3) } } })
 				end).toThrow("type Vector3 at components[2].position")
 				T.expect(function()
-					Json.encode({ ["odd key"] = { 1, coroutine.create(function() end) } })
+					Json.encode({ ["odd key"] = list(1, coroutine.create(function() end)) })
 				end).toThrow('at ["odd key"][2]')
 				T.expect(function()
 					Json.encode(print)
@@ -550,7 +556,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(decoded("1e+2")).toBe(100)
 				T.expect(decoded("2.5E-3")).toBe(0.0025)
 				T.expect(decoded("1e-400")).toBe(0)
-				T.expect(decoded("12345678901234567890")).toBe(12345678901234567890)
+				T.expect(decoded("12345678901234567890")).toBe(tonumber("12345678901234567890"))
 				T.expect(decoded("true")).toBe(true)
 				T.expect(decoded("false")).toBe(false)
 				T.expect(decoded("null")).toBe(NULL)
@@ -558,7 +564,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			end)
 			T.it("parses nested structures", function()
 				local v = decoded('{"a": [1, 2, {"b": "c"}], "d": {"e": [true, false]}, "": 0}')
-				T.expect(v).toEqual({ a = { 1, 2, { b = "c" } }, d = { e = { true, false } }, [""] = 0 })
+				T.expect(v).toEqual({ a = list(1, 2, { b = "c" }), d = { e = { true, false } }, [""] = 0 })
 			end)
 			T.it("accepts all JSON whitespace", function()
 				T.expect(decoded(" \t\r\n[ 1 ,\n\t2 ]\r\n ")).toEqual({ 1, 2 })
@@ -635,7 +641,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(decodeError(".5")).toBe("line 1, column 1: unexpected '.' (expected a value)")
 				T.expect(decodeError("+1")).toBe("line 1, column 1: unexpected '+' (expected a value)")
 				T.expect(decodeError("-")).toBe("line 1, column 2: invalid number (expected a digit, got end of input)")
-				T.expect(decodeError("1e")).toContain("line 1, column 3: invalid number (expected a digit in the exponent")
+				T.expect(decodeError("1e"))
+					.toContain("line 1, column 3: invalid number (expected a digit in the exponent")
 				T.expect(decodeError("1e+")).toContain("line 1, column 4: invalid number")
 				T.expect(decodeError("0x10")).toBe("line 1, column 2: unexpected 'x' after the JSON value")
 				T.expect(decodeError("NaN")).toBe("line 1, column 1: unexpected 'N' (expected a value)")
@@ -675,7 +682,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(decodeError('"a\nb"')).toBe("line 1, column 3: unescaped control character U+000A in string")
 				T.expect(decodeError('"\0"')).toBe("line 1, column 2: unescaped control character U+0000 in string")
 				T.expect(decodeError('"\\x"')).toBe("line 1, column 2: invalid escape sequence \\x")
-				T.expect(decodeError("\"\\'\"")).toBe("line 1, column 2: invalid escape sequence \\'")
+				T.expect(decodeError('"\\\'"')).toBe("line 1, column 2: invalid escape sequence \\'")
 				T.expect(decodeError('"\\u12"')).toBe("line 1, column 2: invalid \\u escape (expected 4 hex digits)")
 				T.expect(decodeError('"\\u12G4"')).toContain("invalid \\u escape")
 			end)
@@ -685,7 +692,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(decodeError('"\\uD800\\u0041"')).toBe("line 1, column 8: expected low surrogate after \\uD800")
 				T.expect(decodeError('"\\uD800\\uD800"')).toContain("expected low surrogate")
 				T.expect(decodeError('"\\uDC00"')).toBe("line 1, column 2: unpaired low surrogate \\uDC00")
-				T.expect(decodeError('"\\uD800\\u12"')).toBe("line 1, column 8: invalid \\u escape (expected 4 hex digits)")
+				T.expect(decodeError('"\\uD800\\u12"'))
+					.toBe("line 1, column 8: invalid \\u escape (expected 4 hex digits)")
 			end)
 			T.it("rejects invalid UTF-8", function()
 				T.expect(decodeError('"\255"')).toBe("line 1, column 2: invalid UTF-8 in string")
@@ -697,26 +705,24 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(decodeError("\255")).toBe("line 1, column 1: unexpected byte 0xFF (expected a value)")
 			end)
 			T.it("counts lines and columns across line endings and unicode", function()
-				T.expect(decodeError('{\n  "a": [1,\n    2,,\n  ]\n}')).toBe(
-					"line 3, column 7: unexpected ',' (expected a value)"
-				)
+				T.expect(decodeError('{\n  "a": [1,\n    2,,\n  ]\n}'))
+					.toBe("line 3, column 7: unexpected ',' (expected a value)")
 				T.expect(decodeError("[\r\n1,\r\n]")).toBe("line 3, column 1: trailing comma in array")
 				T.expect(decodeError("[\r1,\r]")).toBe("line 3, column 1: trailing comma in array")
 				T.expect(decodeError("\n\n\n   x")).toBe("line 4, column 4: unexpected 'x' (expected a value)")
-				T.expect(decodeError('["äöü", x]')).toBe("line 1, column 10: unexpected 'x' (expected a value)")
-				T.expect(decodeError("[1, €]")).toBe("line 1, column 5: unexpected character U+20AC '€' (expected a value)")
+				T.expect(decodeError('["äöü", x]')).toBe("line 1, column 9: unexpected 'x' (expected a value)")
+				T.expect(decodeError("[1, €]"))
+					.toBe("line 1, column 5: unexpected character U+20AC '€' (expected a value)")
 				T.expect(decodeError("\239\187\191[x]")).toBe("line 1, column 2: unexpected 'x' (expected a value)")
-				T.expect(decodeError("[1]\239\187\191")).toBe(
-					"line 1, column 4: unexpected character U+FEFF '\239\187\191' after the JSON value"
-				)
+				T.expect(decodeError("[1]\239\187\191"))
+					.toBe("line 1, column 4: unexpected character U+FEFF '\239\187\191' after the JSON value")
 				T.expect(decodeError("[1]\239\187")).toBe("line 1, column 4: unexpected byte 0xEF after the JSON value")
 			end)
 			T.it("limits nesting depth to 200", function()
 				T.expect(Json.decode(string.rep("[", 200) .. string.rep("]", 200))).toBe(true)
 				T.expect(Json.decode(string.rep('{"a":', 199) .. "{}" .. string.rep("}", 199))).toBe(true)
-				T.expect(decodeError(string.rep("[", 201) .. string.rep("]", 201))).toBe(
-					"line 1, column 201: maximum nesting depth of 200 exceeded"
-				)
+				T.expect(decodeError(string.rep("[", 201) .. string.rep("]", 201)))
+					.toBe("line 1, column 201: maximum nesting depth of 200 exceeded")
 				T.expect(decodeError(string.rep("[", 100000))).toContain("maximum nesting depth of 200 exceeded")
 				T.expect(decodeError(string.rep('{"a":', 201))).toContain("maximum nesting depth")
 			end)
@@ -739,7 +745,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			local doc = sampleDoc()
 			T.expect(decoded(Json.encode(doc))).toEqual(doc)
 			T.expect(decoded(Json.encode(doc, { pretty = false }))).toEqual(doc)
-			local values: { any } = { 0, -12, 0.5, "x\n\"y\"", true, false, NULL, EMPTY, {}, { 1, { 2, { 3 } } }, { k = "v" } }
+			local values: { any } =
+				{ 0, -12, 0.5, 'x\n"y"', true, false, NULL, EMPTY, {}, list(1, list(2, { 3 })), { k = "v" } }
 			for _, v in values do
 				T.expect(decoded(Json.encode(v))).toEqual(v)
 			end
@@ -758,7 +765,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			T.expect(Json.encode(decoded(Json.encode(doc, { pretty = false })))).toBe(SAMPLE_PRETTY)
 		end)
 		T.it("canonicalizes arbitrary input text", function()
-			local messy = '{"name":"x",  "id":"a","schemaVersion":1, "zeta": [1,2], "alpha": {"b": null, "a": 1.50, "c": 1e2}, "u": "\\u00e9\\/"}'
+			local messy =
+				'{"name":"x",  "id":"a","schemaVersion":1, "zeta": [1,2], "alpha": {"b": null, "a": 1.50, "c": 1e2}, "u": "\\u00e9\\/"}'
 			local canonical = table.concat({
 				"{",
 				'  "schemaVersion": 1,',
@@ -792,7 +800,9 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			T.expect(Json.isArray(EMPTY)).toBe(false)
 			T.expect(Json.isArray(NULL)).toBe(false)
 			T.expect(Json.isArray({ a = 1 })).toBe(false)
-			T.expect(Json.isArray({ 1, a = 1 })).toBe(false)
+			local mixed: any = { 1 }
+			mixed.a = 1
+			T.expect(Json.isArray(mixed)).toBe(false)
 			T.expect(Json.isArray({ [2] = 1 })).toBe(false)
 			T.expect(Json.isArray({ [1.5] = 1 })).toBe(false)
 			T.expect(Json.isArray({ [0] = 1 })).toBe(false)
@@ -803,9 +813,20 @@ return function(T: any, use: (string) -> any, _ctx: any)
 	end)
 
 	T.describe("Json performance", function()
-		T.it("encodes and decodes a 2000-element document quickly", function()
-			local components = table.create(2000)
-			for i = 1, 2000 do
+		local function bestOf(runs: number, fn: () -> ()): number
+			local best = math.huge
+			for _ = 1, runs do
+				local started = os.clock()
+				fn()
+				best = math.min(best, os.clock() - started)
+			end
+			return best
+		end
+
+		-- `count` full components (~36 values each: transform, sequences, a track with keyframes).
+		local function heavyDoc(count: number): any
+			local components = table.create(count)
+			for i = 1, count do
 				components[i] = {
 					id = "c" .. i,
 					name = "Component " .. i,
@@ -815,24 +836,71 @@ return function(T: any, use: (string) -> any, _ctx: any)
 					transform = { position = { i, i * 0.5, -i }, rotation = { 0, i % 360, 0 } },
 					properties = { size = { { 0, 1 }, { 1, 0 } }, color = "#FF8800", rate = i },
 					tracks = {
-						{ id = "t" .. i, channel = "transparency", keyframes = { { time = 0, value = 0 }, { time = 1, value = 1 } } },
+						{
+							id = "t" .. i,
+							channel = "transparency",
+							keyframes = { { time = 0, value = 0 }, { time = 1, value = 1 } },
+						},
 					},
 				}
 			end
-			local doc = { schemaVersion = 1, id = "big", name = "Big", duration = 10, components = components }
-			Json.encode(doc) -- warm-up
-			local started = os.clock()
+			return { schemaVersion = 1, id = "big", name = "Big", duration = 10, components = components }
+		end
+
+		T.it("encodes a 2000-element document well under 50 ms", function()
+			local keyframes = table.create(2000)
+			for i = 1, 2000 do
+				keyframes[i] =
+					{ time = i * 0.005, value = (i % 17) / 16, easing = if i % 3 == 0 then "Quad.Out" else "Linear" }
+			end
+			local doc = {
+				schemaVersion = 1,
+				id = "long-track",
+				name = "Long Track",
+				duration = 10,
+				components = {
+					{
+						id = "c",
+						name = "C",
+						type = "part",
+						tracks = { { id = "t", channel = "transparency", keyframes = keyframes } },
+					},
+				},
+			}
 			local text = Json.encode(doc)
-			local encodeTime = os.clock() - started
-			T.expect(encodeTime).toBeLessThan(0.05)
-			T.expect(#text).toBeGreaterThan(100000)
-			started = os.clock()
-			local ok, back = Json.decode(text)
-			local decodeTime = os.clock() - started
-			T.expect(ok).toBe(true)
-			T.expect(decodeTime).toBeLessThan(0.1)
-			T.expect(#back.components).toBe(2000)
-			T.expect(Json.encode(back)).toBe(text)
+			T.expect(bestOf(3, function()
+				Json.encode(doc)
+			end)).toBeLessThan(0.05)
+			T.expect(bestOf(3, function()
+				Json.encode(doc, { pretty = false })
+			end)).toBeLessThan(0.05)
+			T.expect(bestOf(3, function()
+				Json.decode(text)
+			end)).toBeLessThan(0.05)
+			T.expect(Json.encode(decoded(text))).toBe(text)
+		end)
+
+		T.it("scales linearly with document size (no quadratic string building)", function()
+			local small, large = heavyDoc(500), heavyDoc(2000)
+			local smallText, largeText = Json.encode(small), Json.encode(large)
+			local encodeSmall = bestOf(3, function()
+				Json.encode(small)
+			end)
+			local encodeLarge = bestOf(3, function()
+				Json.encode(large)
+			end)
+			local decodeSmall = bestOf(3, function()
+				Json.decode(smallText)
+			end)
+			local decodeLarge = bestOf(3, function()
+				Json.decode(largeText)
+			end)
+			-- 4x the data: linear ≈ 4x the time, quadratic ≈ 16x. Allow generous noise.
+			T.expect(encodeLarge / encodeSmall).toBeLessThan(8)
+			T.expect(decodeLarge / decodeSmall).toBeLessThan(8)
+			T.expect(encodeLarge).toBeLessThan(0.5)
+			T.expect(#largeText).toBeGreaterThan(1000000)
+			T.expect(Json.encode(decoded(largeText))).toBe(largeText)
 		end)
 	end)
 end

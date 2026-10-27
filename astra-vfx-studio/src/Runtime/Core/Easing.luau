@@ -30,9 +30,18 @@
 	  The curves have not been compared against TweenService:GetValue here (no Studio); Easing.spec contains a
 	  Studio-only test that does exactly that.
 
+	Interpretation notes (where MODULE_CONTRACTS §7 leaves room):
+	* Like TweenService:GetValue, curves clamp alpha to [0, 1]; NaN maps to 0.
+	* Elastic InOut uses Penner's period 0.3 · 1.5 = 0.45 (the contract fixes 0.3 only for In/Out); Back InOut uses
+	  Penner's s · 1.525.
+	* normalize() drops the default direction ("Quad.Out" -> "Quad") and any direction on Linear/Constant, so each
+	  meaning has exactly one canonical string. Bezier definitions are copied unchanged (-0 -> 0); a bezier that
+	  happens to be linear stays a bezier.
+	* Easing.bezier(a, a, b, b) returns the exact Linear curve (y(s) = x(s) for such handles).
+
 	Bezier: CSS cubic-bezier with P0 = (0, 0), P3 = (1, 1). x1, x2 must be in [0, 1] (then x(s) is monotone and
 	the curve is a function of x); y1, y2 may be any finite number (overshoot). y(x) is found by solving
-	x(s) = x with Newton's method (8 steps, |error| < 1e-10) and a bisection fallback (≤ 64 steps).
+	x(s) = x with Newton's method (8 steps, |error| < 1e-12) and a bisection fallback (≤ 64 steps).
 ]]
 
 local Types = require(script.Parent.Types)
@@ -66,7 +75,7 @@ local BACK_S_INOUT = BACK_S * 1.525
 local ELASTIC_PERIOD = 0.3
 local ELASTIC_PERIOD_INOUT = 0.3 * 1.5
 
-local BEZIER_EPSILON = 1e-10
+local BEZIER_EPSILON = 1e-12
 local NEWTON_STEPS = 8
 local BISECTION_STEPS = 64
 
@@ -456,10 +465,18 @@ end
 
 -- Curve for a style and direction (default "Out"). Errors on unknown names.
 function Easing.get(style: string, direction: string?): EasingFn
+	if type(style) ~= "string" then
+		error("Easing.get: style must be a string, got " .. typeof(style), 2)
+	end
 	local byDirection = FUNCS[style]
 	if byDirection == nil then
-		local ok, problem = checkString(if type(style) == "string" then style else "")
-		error("Easing.get: " .. (if ok then "invalid style" else tostring(problem)), 2)
+		local ok, problem = checkString(style)
+		if ok then
+			problem = "expected a style name without a direction, got "
+				.. quote(style)
+				.. " (pass the direction separately or use Easing.parse)"
+		end
+		error("Easing.get: " .. tostring(problem), 2)
 	end
 	local dir = direction or Easing.DEFAULT_DIRECTION
 	local fn = byDirection[dir]

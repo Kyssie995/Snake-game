@@ -27,7 +27,7 @@ function Env.getService(name: string): Instance
 	if overridden ~= nil then
 		return overridden
 	end
-	local cached = cache[name]
+	local cached: Instance? = cache[name]
 	if cached ~= nil then
 		return cached
 	end

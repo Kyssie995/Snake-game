@@ -33,6 +33,16 @@
 
 local Constants = require(script.Parent.Constants)
 
+-- Builtins as locals: Luau still compiles these never-reassigned aliases as builtin fast calls, and they avoid
+-- per-call global lookups when the module runs in a custom environment (e.g. the Lune test loader).
+local type, next, typeof, tostring, tonumber = type, next, typeof, tostring, tonumber
+local error, pcall, setmetatable, getmetatable = error, pcall, setmetatable, getmetatable
+local byte, char, find, sub, match = string.byte, string.char, string.find, string.sub, string.match
+local format, gsub, pack = string.format, string.gsub, string.pack
+local concat, sort, insert, create = table.concat, table.sort, table.insert, table.create
+local floor, abs, HUGE = math.floor, math.abs, math.huge
+local utf8len, utf8char, utf8codepoint = utf8.len, utf8.char, utf8.codepoint
+
 local Json = {}
 
 export type EncodeOptions = {
@@ -76,20 +86,33 @@ local ESCAPES: { [string]: string } = {
 	["\t"] = "\\t",
 	["\127"] = "\\u007f",
 }
-for byte = 0, 31 do
-	local char = string.char(byte)
-	if ESCAPES[char] == nil then
-		ESCAPES[char] = string.format("\\u%04x", byte)
+for code = 0, 31 do
+	local c = char(code)
+	if ESCAPES[c] == nil then
+		ESCAPES[c] = format("\\u%04x", code)
 	end
 end
 local ESCAPE_PATTERN = '[%z\1-\31"\\\127]'
 
-local INDENTS: { string } = {}
-local function indent(level: number): string
-	local s = INDENTS[level]
+-- Bytes that need a closer look: control characters, '"', '\', DEL and every non-ASCII byte.
+local NON_PLAIN_PATTERN = '[%z\1-\31"\\\127-\255]'
+
+-- "\n" .. indentation and ",\n" .. indentation per nesting level (pretty layout, 2 spaces per level).
+local LINE_INDENTS: { [number]: string } = {}
+local COMMA_LINE_INDENTS: { [number]: string } = {}
+local function lineIndent(level: number): string
+	local s = LINE_INDENTS[level]
 	if s == nil then
-		s = string.rep("  ", level)
-		INDENTS[level] = s
+		s = "\n" .. string.rep("  ", level)
+		LINE_INDENTS[level] = s
+	end
+	return s
+end
+local function commaLineIndent(level: number): string
+	local s = COMMA_LINE_INDENTS[level]
+	if s == nil then
+		s = ",\n" .. string.rep("  ", level)
+		COMMA_LINE_INDENTS[level] = s
 	end
 	return s
 end
@@ -111,22 +134,22 @@ local DEFAULT_RANK = buildRank(Constants.KEY_ORDER)
 
 -- Formats a number canonically, or returns nil for NaN / ±inf.
 local function formatNumber(x: number): string?
-	if x ~= x or x == math.huge or x == -math.huge then
+	if x ~= x or x == HUGE or x == -HUGE then
 		return nil
 	end
 	if x == 0 then
 		return "0" -- also -0
 	end
-	local a = math.abs(x)
+	local a = abs(x)
 	if a >= TWO_POW_53 then
 		return tostring(x) -- integral; Luau's shortest round-trip representation
 	end
-	local whole = math.floor(a)
+	local whole = floor(a)
 	if whole == a then
-		return string.format("%d", x)
+		return format("%d", x)
 	end
 	-- a - whole is exact in binary floating point; round the fraction to 6 decimals (half away from zero).
-	local micros = math.floor((a - whole) * 1e6 + 0.5)
+	local micros = floor((a - whole) * 1e6 + 0.5)
 	if micros >= 1000000 then
 		whole += 1
 		micros = 0
@@ -136,22 +159,22 @@ local function formatNumber(x: number): string?
 		if whole == 0 then
 			return "0"
 		end
-		return sign .. string.format("%d", whole)
+		return sign .. format("%d", whole)
 	end
-	local digits = string.format("%06d", micros)
-	digits = (string.gsub(digits, "0+$", ""))
-	return sign .. string.format("%d", whole) .. "." .. digits
+	local digits = format("%06d", micros)
+	digits = (gsub(digits, "0+$", ""))
+	return sign .. format("%d", whole) .. "." .. digits
 end
 
 local function isIdentifier(key: string): boolean
-	return string.find(key, "^[%a_][%w_]*$") ~= nil
+	return find(key, "^[%a_][%w_]*$") ~= nil
 end
 
 local function formatPath(path: { any }, length: number): string
 	if length == 0 then
 		return "(root)"
 	end
-	local parts = table.create(length)
+	local parts = create(length)
 	for i = 1, length do
 		local key = path[i]
 		if type(key) == "number" then
@@ -159,10 +182,10 @@ local function formatPath(path: { any }, length: number): string
 		elseif isIdentifier(key) then
 			parts[i] = if i == 1 then key else "." .. key
 		else
-			parts[i] = string.format("[%q]", key)
+			parts[i] = format("[%q]", key)
 		end
 	end
-	return table.concat(parts)
+	return concat(parts)
 end
 
 -- Public API ------------------------------------------------------------------------------------------------------
@@ -212,60 +235,112 @@ function Json.encode(value: any, options: EncodeOptions?): string
 	local path: { any } = {}
 	local pathLength = 0
 	local visiting: { [any]: boolean } = {}
-	local quotedKeys: { [string]: string } = {}
+	-- Per-call caches: effect documents repeat the same keys, strings and numbers many times.
+	local quotedStrings: { [string]: string } = {}
+	local formattedNumbers: { [number]: string } = {}
+	local memberPrefixes: { [string]: string } = {}
+	local sortKeyOf: { [string]: string } = {}
+	local keyOfSortKey: { [string]: string } = {}
 	local colon = if pretty then ": " else ":"
 
-	local function fail(message: string): never
+	-- Cast to a never-returning type: the old type solver cannot infer that error() does not return.
+	local fail: (message: string) -> never = function(message: string)
 		error("Json.encode: " .. message .. " at " .. formatPath(path, pathLength), 0)
-	end
+	end :: any
 
 	local function quote(s: string): string
-		if utf8.len(s) == nil then
-			fail("string is not valid UTF-8")
+		local quoted = quotedStrings[s]
+		if quoted ~= nil then
+			return quoted
 		end
-		if string.find(s, ESCAPE_PATTERN) then
-			s = (string.gsub(s, ESCAPE_PATTERN, ESCAPES))
-		end
-		return '"' .. s .. '"'
-	end
-
-	local function compareKeys(a: string, b: string): boolean
-		local ra, rb = rank[a], rank[b]
-		if ra ~= nil then
-			if rb ~= nil then
-				return ra < rb
+		if find(s, NON_PLAIN_PATTERN) == nil then
+			quoted = '"' .. s .. '"' -- printable ASCII only: nothing to validate or escape
+		else
+			if utf8len(s) == nil then
+				fail("string is not valid UTF-8")
 			end
-			return true
-		elseif rb ~= nil then
-			return false
+			quoted = '"' .. (gsub(s, ESCAPE_PATTERN, ESCAPES)) .. '"'
 		end
-		return a < b
+		quotedStrings[s] = quoted
+		return quoted
 	end
 
-	local function isScalar(v: any): boolean
-		local t = type(v)
-		return t == "string" or t == "number" or t == "boolean" or v == NULL
+	local function number(x: number): string
+		local formatted = formatNumber(x)
+		if formatted == nil then
+			fail("cannot encode non-finite number " .. tostring(x))
+		end
+		formattedNumbers[x] = formatted :: string
+		return formatted :: string
 	end
 
-	local writeValue: (v: any, depth: number) -> ()
+	-- Byte-wise sortable key: ranked keys sort by rank, before all others, which sort by their own bytes.
+	local function sortKey(key: string): string
+		local sk = sortKeyOf[key]
+		if sk == nil then
+			local r = rank[key]
+			sk = if r ~= nil then "\0" .. pack(">I4", r) else "\1" .. key
+			sortKeyOf[key] = sk
+			keyOfSortKey[sk] = key
+		end
+		return sk
+	end
 
-	local function writeTable(t: { [any]: any }, depth: number)
+	local function memberPrefix(key: string): string
+		local prefix = quote(key) .. colon
+		memberPrefixes[key] = prefix
+		return prefix
+	end
+
+	local writeTable: (t: { [any]: any }, depth: number) -> ()
+
+	local function writeValue(v: any, depth: number)
+		local vt = type(v)
+		if vt == "string" then
+			n += 1
+			out[n] = quotedStrings[v] or quote(v)
+		elseif vt == "number" then
+			n += 1
+			out[n] = formattedNumbers[v] or number(v)
+		elseif vt == "boolean" then
+			n += 1
+			out[n] = if v then "true" else "false"
+		elseif v == NULL then
+			n += 1
+			out[n] = "null"
+		elseif v == EMPTY_OBJECT then
+			n += 1
+			out[n] = "{}"
+		elseif vt == "table" then
+			writeTable(v, depth + 1)
+		elseif vt == "nil" then
+			fail("cannot encode nil (use Json.NULL)")
+		else
+			fail("cannot encode a value of type " .. typeof(v))
+		end
+	end
+
+	writeTable = function(t: { [any]: any }, depth: number)
 		if depth > MAX_DEPTH then
 			fail("nesting deeper than " .. MAX_DEPTH .. " levels")
 		end
 		if visiting[t] then
 			fail("cyclic table reference")
 		end
-		-- Classify by raw keys.
+		-- Classify by raw keys (collecting sortable object keys on the way).
 		local count, maxIndex = 0, 0
-		local hasString, hasIndex = false, false
+		local sortKeys: { string }? = nil
 		for key in next, t do
 			count += 1
 			local kt = type(key)
 			if kt == "string" then
-				hasString = true
+				local sk = sortKeyOf[key] or sortKey(key)
+				if sortKeys == nil then
+					sortKeys = { sk }
+				else
+					sortKeys[#sortKeys + 1] = sk
+				end
 			elseif kt == "number" and key >= 1 and key % 1 == 0 then
-				hasIndex = true
 				if key > maxIndex then
 					maxIndex = key
 				end
@@ -278,127 +353,70 @@ function Json.encode(value: any, options: EncodeOptions?): string
 			out[n] = "[]"
 			return
 		end
-		if hasString and hasIndex then
+		if sortKeys ~= nil and maxIndex > 0 then
 			fail("mixed table (array indices and string keys)")
 		end
-		if hasIndex and maxIndex ~= count then
+		if sortKeys == nil and maxIndex ~= count then
 			fail("sparse array (" .. count .. " elements but highest index " .. maxIndex .. ")")
 		end
 		visiting[t] = true
 		pathLength += 1
 		local slot = pathLength
-		if hasIndex then
-			if not pretty then
-				n += 1
-				out[n] = "["
+		if sortKeys == nil then
+			local inline = not pretty
+			if pretty and count <= 8 then
+				inline = true
 				for i = 1, count do
-					if i > 1 then
-						n += 1
-						out[n] = ","
+					local v = t[i]
+					local vt = type(v)
+					if vt ~= "string" and vt ~= "number" and vt ~= "boolean" and v ~= NULL then
+						inline = false
+						break
 					end
-					path[slot] = i
-					writeValue(t[i], depth)
 				end
-				n += 1
-				out[n] = "]"
+			end
+			local first, separator, close
+			if inline then
+				first, separator, close = "[", if pretty then ", " else ",", "]"
 			else
-				local inline = count <= 8
-				if inline then
-					for i = 1, count do
-						if not isScalar(t[i]) then
-							inline = false
-							break
-						end
-					end
-				end
-				if inline then
-					n += 1
-					out[n] = "["
-					for i = 1, count do
-						if i > 1 then
-							n += 1
-							out[n] = ", "
-						end
-						path[slot] = i
-						writeValue(t[i], depth)
-					end
-					n += 1
-					out[n] = "]"
-				else
-					local inner = "\n" .. indent(depth)
-					n += 1
-					out[n] = "["
-					for i = 1, count do
-						n += 1
-						out[n] = if i > 1 then "," .. inner else inner
-						path[slot] = i
-						writeValue(t[i], depth)
-					end
-					n += 1
-					out[n] = "\n" .. indent(depth - 1) .. "]"
-				end
+				first, separator, close = "[" .. lineIndent(depth), commaLineIndent(depth), lineIndent(depth - 1) .. "]"
 			end
-		else
-			local keys: { string } = table.create(count)
-			for key in next, t do
-				table.insert(keys, key)
-			end
-			table.sort(keys, compareKeys)
-			local inner = if pretty then "\n" .. indent(depth) else ""
-			n += 1
-			out[n] = "{"
-			for i, key in keys do
-				path[slot] = key
-				local quoted = quotedKeys[key]
-				if quoted == nil then
-					quoted = quote(key)
-					quotedKeys[key] = quoted
-				end
+			for i = 1, count do
+				path[slot] = i
 				n += 1
-				out[n] = (if i > 1 then "," .. inner else inner) .. quoted .. colon
+				out[n] = if i == 1 then first else separator
+				writeValue(t[i], depth)
+			end
+			n += 1
+			out[n] = close
+		else
+			local keys: { string } = sortKeys
+			if count > 1 then
+				sort(keys)
+			end
+			local first, separator, close
+			if pretty then
+				first, separator, close = "{" .. lineIndent(depth), commaLineIndent(depth), lineIndent(depth - 1) .. "}"
+			else
+				first, separator, close = "{", ",", "}"
+			end
+			for i = 1, count do
+				local key = keyOfSortKey[keys[i]]
+				path[slot] = key
+				n += 2
+				out[n - 1] = if i == 1 then first else separator
+				out[n] = memberPrefixes[key] or memberPrefix(key)
 				writeValue(t[key], depth)
 			end
 			n += 1
-			out[n] = if pretty then "\n" .. indent(depth - 1) .. "}" else "}"
+			out[n] = close
 		end
 		pathLength -= 1
 		visiting[t] = nil
 	end
 
-	writeValue = function(v: any, depth: number)
-		local t = type(v)
-		if t == "string" then
-			n += 1
-			out[n] = quote(v)
-		elseif t == "number" then
-			local s = formatNumber(v)
-			if s == nil then
-				fail("cannot encode non-finite number " .. tostring(v))
-			end
-			n += 1
-			out[n] = s :: string
-		elseif t == "boolean" then
-			n += 1
-			out[n] = if v then "true" else "false"
-		elseif t == "table" then
-			if v == NULL then
-				n += 1
-				out[n] = "null"
-			elseif v == EMPTY_OBJECT then
-				n += 1
-				out[n] = "{}"
-			else
-				writeTable(v, depth + 1)
-			end
-		elseif t == "nil" then
-			fail("cannot encode nil (use Json.NULL)")
-		else
-			fail("cannot encode a value of type " .. typeof(v))
-		end
-	end
-
 	writeValue(value, 0)
-	return table.concat(out, "", 1, n)
+	return concat(out, "", 1, n)
 end
 
 -- Decoder ---------------------------------------------------------------------------------------------------------
@@ -409,9 +427,10 @@ local srcLength = 0
 
 local ParseError = {}
 
-local function parseFail(pos: number, message: string): never
+-- Cast to a never-returning type: the old type solver cannot infer that error() does not return.
+local parseFail: (pos: number, message: string) -> never = function(pos: number, message: string)
 	error(setmetatable({ pos = pos, message = message }, ParseError), 0)
-end
+end :: any
 
 local SIMPLE_ESCAPES: { [number]: string } = {
 	[34] = '"', -- \"
@@ -425,39 +444,39 @@ local SIMPLE_ESCAPES: { [number]: string } = {
 }
 
 local function describeAt(pos: number): string
-	local c = string.byte(src, pos)
+	local c = byte(src, pos)
 	if c == nil then
 		return "end of input"
 	elseif c >= 32 and c < 127 then
-		return "'" .. string.char(c) .. "'"
+		return "'" .. char(c) .. "'"
 	elseif c >= 0xC2 and c <= 0xF4 then
 		-- Non-ASCII: show the code point too (makes invisible characters such as U+FEFF identifiable).
-		local seq = string.match(src, "^[\xC2-\xF4][\x80-\xBF]*", pos)
-		if seq and utf8.len(seq) == 1 then
-			return string.format("character U+%04X '%s'", utf8.codepoint(seq), seq)
+		local seq = match(src, "^[\194-\244][\128-\191]*", pos)
+		if seq and utf8len(seq) == 1 then
+			return format("character U+%04X '%s'", utf8codepoint(seq), seq)
 		end
 	end
-	return string.format("byte 0x%02X", c)
+	return format("byte 0x%02X", c)
 end
 
 local function skipWhitespace(pos: number): number
-	local c = string.byte(src, pos)
+	local c = byte(src, pos)
 	if c == 32 or c == 10 or c == 13 or c == 9 then
-		local _, last = string.find(src, "^[ \t\r\n]*", pos)
+		local _, last = find(src, "^[ \t\r\n]*", pos)
 		return (last :: number) + 1
 	end
 	return pos
 end
 
 local function checkUtf8(chunk: string, chunkStart: number)
-	local ok, badIndex = utf8.len(chunk)
+	local ok, badIndex = utf8len(chunk)
 	if ok == nil then
 		parseFail(chunkStart + (badIndex :: number) - 1, "invalid UTF-8 in string")
 	end
 end
 
 local function readHex4(pos: number): number?
-	local hex = string.match(src, "^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]", pos)
+	local hex = match(src, "^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]", pos)
 	if hex == nil then
 		return nil
 	end
@@ -466,28 +485,33 @@ end
 
 -- pos is at the opening quote; returns (string, position after the closing quote).
 local function parseString(pos: number): (string, number)
+	-- Fast path: printable ASCII without escapes (most keys and values) needs no UTF-8 validation.
+	local _, last, plain = find(src, '^"([^"\\%z\1-\31\127-\255]*)"', pos)
+	if plain ~= nil then
+		return plain, (last :: number) + 1
+	end
 	local p = pos + 1
 	local parts: { string }? = nil
 	while true do
-		local special = string.find(src, '[%z\1-\31"\\]', p)
+		local special = find(src, '[%z\1-\31"\\]', p)
 		if special == nil then
 			parseFail(srcLength + 1, "unterminated string (missing closing '\"')")
 		end
 		local s = special :: number
-		local c = string.byte(src, s)
-		local chunk = string.sub(src, p, s - 1)
+		local c = byte(src, s)
+		local chunk = sub(src, p, s - 1)
 		checkUtf8(chunk, p)
 		if c == 34 then
 			if parts == nil then
 				return chunk, s + 1
 			end
-			table.insert(parts, chunk)
-			return table.concat(parts), s + 1
+			insert(parts, chunk)
+			return concat(parts), s + 1
 		elseif c == 92 then
 			local list: { string } = parts or {}
 			parts = list
-			table.insert(list, chunk)
-			local e = string.byte(src, s + 1)
+			insert(list, chunk)
+			local e = byte(src, s + 1)
 			if e == 117 then -- \uXXXX
 				local code = readHex4(s + 2)
 				if code == nil then
@@ -496,8 +520,8 @@ local function parseString(pos: number): (string, number)
 				local cp = code :: number
 				p = s + 6
 				if cp >= 0xD800 and cp <= 0xDBFF then
-					if string.sub(src, p, p + 1) ~= "\\u" then
-						parseFail(s, "unpaired high surrogate \\u" .. string.format("%04X", cp))
+					if sub(src, p, p + 1) ~= "\\u" then
+						parseFail(s, "unpaired high surrogate \\u" .. format("%04X", cp))
 					end
 					local low = readHex4(p + 2)
 					if low == nil then
@@ -505,78 +529,78 @@ local function parseString(pos: number): (string, number)
 					end
 					local lo = low :: number
 					if lo < 0xDC00 or lo > 0xDFFF then
-						parseFail(p, "expected low surrogate after \\u" .. string.format("%04X", cp))
+						parseFail(p, "expected low surrogate after \\u" .. format("%04X", cp))
 					end
 					cp = 0x10000 + (cp - 0xD800) * 0x400 + (lo - 0xDC00)
 					p += 6
 				elseif cp >= 0xDC00 and cp <= 0xDFFF then
-					parseFail(s, "unpaired low surrogate \\u" .. string.format("%04X", cp))
+					parseFail(s, "unpaired low surrogate \\u" .. format("%04X", cp))
 				end
-				table.insert(list, utf8.char(cp))
+				insert(list, utf8char(cp))
 			else
 				local replacement = if e == nil then nil else SIMPLE_ESCAPES[e]
 				if replacement == nil then
 					if e == nil then
 						parseFail(srcLength + 1, "unterminated string (missing closing '\"')")
 					end
-					parseFail(s, "invalid escape sequence \\" .. string.char(e :: number))
+					parseFail(s, "invalid escape sequence \\" .. char(e :: number))
 				end
-				table.insert(list, replacement :: string)
+				insert(list, replacement :: string)
 				p = s + 2
 			end
 		else
-			parseFail(s, string.format("unescaped control character U+%04X in string", c :: number))
+			parseFail(s, format("unescaped control character U+%04X in string", c :: number))
 		end
 	end
 end
 
 local function parseNumber(pos: number): (number, number)
 	local p = pos
-	if string.byte(src, p) == 45 then -- '-'
+	if byte(src, p) == 45 then -- '-'
 		p += 1
 	end
-	local c = string.byte(src, p)
+	local c = byte(src, p)
 	if c == 48 then -- '0'
 		p += 1
-		local nextChar = string.byte(src, p)
+		local nextChar = byte(src, p)
 		if nextChar and nextChar >= 48 and nextChar <= 57 then
 			parseFail(pos, "invalid number (leading zeros are not allowed)")
 		end
 	elseif c and c >= 49 and c <= 57 then
-		local _, last = string.find(src, "^[0-9]+", p)
+		local _, last = find(src, "^[0-9]+", p)
 		p = (last :: number) + 1
 	else
 		parseFail(p, "invalid number (expected a digit, got " .. describeAt(p) .. ")")
 	end
-	if string.byte(src, p) == 46 then -- '.'
-		local _, last = string.find(src, "^[0-9]+", p + 1)
+	if byte(src, p) == 46 then -- '.'
+		local _, last = find(src, "^[0-9]+", p + 1)
 		if last == nil then
 			parseFail(p + 1, "invalid number (expected a digit after '.', got " .. describeAt(p + 1) .. ")")
 		end
 		p = (last :: number) + 1
 	end
-	c = string.byte(src, p)
+	c = byte(src, p)
 	if c == 101 or c == 69 then -- 'e' / 'E'
 		p += 1
-		c = string.byte(src, p)
+		c = byte(src, p)
 		if c == 43 or c == 45 then
 			p += 1
 		end
-		local _, last = string.find(src, "^[0-9]+", p)
+		local _, last = find(src, "^[0-9]+", p)
 		if last == nil then
 			parseFail(p, "invalid number (expected a digit in the exponent, got " .. describeAt(p) .. ")")
 		end
 		p = (last :: number) + 1
 	end
-	local value = tonumber(string.sub(src, pos, p - 1))
-	if value == nil or value ~= value or value == math.huge or value == -math.huge then
+	local value = tonumber(sub(src, pos, p - 1))
+	if value == nil or value ~= value or value == HUGE or value == -HUGE then
 		parseFail(pos, "number out of range")
 	end
 	return value :: number, p
 end
 
 local function expectLiteral(pos: number, literal: string)
-	if string.sub(src, pos, pos + #literal - 1) ~= literal then
+	if sub(src, pos, pos + #literal - 1) ~= literal then
 		parseFail(pos, "invalid literal (expected '" .. literal .. "')")
 	end
 end
@@ -590,7 +614,7 @@ local function parseArray(pos: number, depth: number): ({ any }, number)
 	local array: { any } = {}
 	local count = 0
 	local p = skipWhitespace(pos + 1)
-	if string.byte(src, p) == 93 then -- ']'
+	if byte(src, p) == 93 then -- ']'
 		return array, p + 1
 	end
 	while true do
@@ -599,10 +623,10 @@ local function parseArray(pos: number, depth: number): ({ any }, number)
 		count += 1
 		array[count] = value
 		p = skipWhitespace(p)
-		local c = string.byte(src, p)
+		local c = byte(src, p)
 		if c == 44 then -- ','
 			p = skipWhitespace(p + 1)
-			if string.byte(src, p) == 93 then
+			if byte(src, p) == 93 then
 				parseFail(p, "trailing comma in array")
 			end
 		elseif c == 93 then
@@ -623,11 +647,11 @@ local function parseObject(pos: number, depth: number): (any, number)
 	local nullKeys: { [string]: boolean }? = nil
 	local hasMember = false
 	local p = skipWhitespace(pos + 1)
-	if string.byte(src, p) == 125 then -- '}'
+	if byte(src, p) == 125 then -- '}'
 		return EMPTY_OBJECT, p + 1
 	end
 	while true do
-		local c = string.byte(src, p)
+		local c = byte(src, p)
 		if c ~= 34 then
 			if c == 125 then
 				parseFail(p, "trailing comma in object")
@@ -640,10 +664,10 @@ local function parseObject(pos: number, depth: number): (any, number)
 		local key
 		key, p = parseString(p)
 		if object[key] ~= nil or (nullKeys ~= nil and nullKeys[key]) then
-			parseFail(keyPos, string.format("duplicate key %q", key))
+			parseFail(keyPos, format("duplicate key %q", key))
 		end
 		p = skipWhitespace(p)
-		if string.byte(src, p) ~= 58 then -- ':'
+		if byte(src, p) ~= 58 then -- ':'
 			parseFail(p, "expected ':' after object key, got " .. describeAt(p))
 		end
 		p = skipWhitespace(p + 1)
@@ -658,7 +682,7 @@ local function parseObject(pos: number, depth: number): (any, number)
 			hasMember = true
 		end
 		p = skipWhitespace(p)
-		c = string.byte(src, p)
+		c = byte(src, p)
 		if c == 44 then
 			p = skipWhitespace(p + 1)
 		elseif c == 125 then
@@ -672,7 +696,7 @@ local function parseObject(pos: number, depth: number): (any, number)
 end
 
 parseValue = function(pos: number, depth: number): (any, number)
-	local c = string.byte(src, pos)
+	local c = byte(src, pos)
 	if c == 34 then -- '"'
 		return parseString(pos)
 	elseif c == 123 then -- '{'
@@ -702,16 +726,16 @@ local function lineColumn(bodyStart: number, pos: number): (number, number)
 	local i = bodyStart
 	local stop = math.min(pos, srcLength + 1)
 	while i < stop do
-		local c = string.byte(src, i)
+		local c = byte(src, i)
 		-- "\r\n" counts once (at the "\n"); a lone "\r" is a line break of its own.
-		if c == 10 or (c == 13 and string.byte(src, i + 1) ~= 10) then
+		if c == 10 or (c == 13 and byte(src, i + 1) ~= 10) then
 			line += 1
 			lineStart = i + 1
 		end
 		i += 1
 	end
-	local segment = string.sub(src, lineStart, stop - 1)
-	local column = (utf8.len(segment) or #segment) + 1
+	local segment = sub(src, lineStart, stop - 1)
+	local column = (utf8len(segment) or #segment) + 1
 	return line, column
 end
 
@@ -722,7 +746,7 @@ function Json.decode(text: string): (boolean, any)
 	end
 	src = text
 	srcLength = #text
-	local bodyStart = if string.sub(text, 1, 3) == "\239\187\191" then 4 else 1
+	local bodyStart = if sub(text, 1, 3) == "\239\187\191" then 4 else 1
 	local ok, result = pcall(function(): any
 		local p = skipWhitespace(bodyStart)
 		local value
@@ -737,7 +761,7 @@ function Json.decode(text: string): (boolean, any)
 	if not ok then
 		if type(result) == "table" and getmetatable(result) == ParseError then
 			local line, column = lineColumn(bodyStart, result.pos)
-			message = string.format("line %d, column %d: %s", line, column, result.message)
+			message = format("line %d, column %d: %s", line, column, result.message)
 		else
 			src = ""
 			srcLength = 0
