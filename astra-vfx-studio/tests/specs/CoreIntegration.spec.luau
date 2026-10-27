@@ -19,6 +19,11 @@ return function(T: any, use: (string) -> any, _ctx: any)
 	local Random = use("AstraVFX.Core.Random")
 	local Components = use("AstraVFX.Core.Components")
 
+	-- Builds a mixed-type array (the type checker infers homogeneous arrays from literals).
+	local function R(...: any): { any }
+		return { ... }
+	end
+
 	local EFFECT_JSON = [=[
 {
   "schemaVersion": 1,
@@ -141,7 +146,10 @@ return function(T: any, use: (string) -> any, _ctx: any)
 		local out = {}
 		for _, c in def.components do
 			local s, e = Timeline.span(def, c)
-			table.insert(out, { id = c.id, name = c.name, type = c.type, startTime = s, endTime = e, events = c.events or {} })
+			table.insert(
+				out,
+				{ id = c.id, name = c.name, type = c.type, startTime = s, endTime = e, events = c.events or {} }
+			)
 		end
 		return out
 	end
@@ -164,7 +172,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 	local function rows(list: { any }): { any }
 		local out = {}
 		for _, a in list do
-			table.insert(out, { a.time, a.action, a.componentId or a.name or "", a.count or 0, a.source })
+			table.insert(out, R(a.time, a.action, a.componentId or a.name or "", a.count or 0, a.source))
 		end
 		return out
 	end
@@ -207,28 +215,31 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(problems[1][3]).toBe("range")
 			end)
 
-			T.it("compiles and evaluates a number track with clamping, easing, a jump and a Constant segment", function()
-				local def = decodeEffect()
-				local orb = component(def, "orb")
-				local spec = Components.channelSpec("part", "transparency")
-				local fade = Curves.compileTrack(track(orb, "fade"), spec, palette(def), 2)
-				local function quadInOut(x: number): number
-					return if x < 0.5 then 2 * x * x else 1 - (-2 * x + 2) ^ 2 / 2
+			T.it(
+				"compiles and evaluates a number track with clamping, easing, a jump and a Constant segment",
+				function()
+					local def = decodeEffect()
+					local orb = component(def, "orb")
+					local spec = Components.channelSpec("part", "transparency")
+					local fade = Curves.compileTrack(track(orb, "fade"), spec, palette(def), 2)
+					local function quadInOut(x: number): number
+						return if x < 0.5 then 2 * x * x else 1 - (-2 * x + 2) ^ 2 / 2
+					end
+					T.expect(Curves.evaluate(fade, -1)).toBe(1) -- 1.5 clamped to the channel max
+					T.expect(Curves.evaluate(fade, 0)).toBe(1)
+					T.expect(Curves.evaluate(fade, 0.125)).toBeCloseTo(1 - quadInOut(0.25), 1e-12)
+					T.expect(Curves.evaluate(fade, 0.25)).toBeCloseTo(0.5, 1e-12)
+					T.expect(Curves.evaluate(fade, 0.5)).toBe(0.25) -- the last key at a shared time wins
+					T.expect(Curves.evaluate(fade, 0.4999)).toBeCloseTo(1 - quadInOut(0.9998), 1e-9)
+					T.expect(Curves.evaluate(fade, 0.75)).toBe(0.25) -- Constant holds
+					T.expect(Curves.evaluate(fade, 1)).toBe(1)
+					T.expect(Curves.evaluate(fade, 0 / 0)).toBe(1)
+					-- the Player evaluates at local time = absolute time - span start
+					local start = Timeline.span(def, orb)
+					T.expect(start).toBe(0.5)
+					T.expect(Curves.evaluate(fade, 0.75 - start)).toBeCloseTo(0.5, 1e-12)
 				end
-				T.expect(Curves.evaluate(fade, -1)).toBe(1) -- 1.5 clamped to the channel max
-				T.expect(Curves.evaluate(fade, 0)).toBe(1)
-				T.expect(Curves.evaluate(fade, 0.125)).toBeCloseTo(1 - quadInOut(0.25), 1e-12)
-				T.expect(Curves.evaluate(fade, 0.25)).toBeCloseTo(0.5, 1e-12)
-				T.expect(Curves.evaluate(fade, 0.5)).toBe(0.25) -- the last key at a shared time wins
-				T.expect(Curves.evaluate(fade, 0.4999)).toBeCloseTo(1 - quadInOut(0.9998), 1e-9)
-				T.expect(Curves.evaluate(fade, 0.75)).toBe(0.25) -- Constant holds
-				T.expect(Curves.evaluate(fade, 1)).toBe(1)
-				T.expect(Curves.evaluate(fade, 0 / 0)).toBe(1)
-				-- the Player evaluates at local time = absolute time - span start
-				local start = Timeline.span(def, orb)
-				T.expect(start).toBe(0.5)
-				T.expect(Curves.evaluate(fade, 0.75 - start)).toBeCloseTo(0.5, 1e-12)
-			end)
+			)
 
 			T.it("sorts out-of-order keyframes, scales length channels and applies a bezier easing", function()
 				local def = decodeEffect()
@@ -311,9 +322,9 @@ return function(T: any, use: (string) -> any, _ctx: any)
 
 			T.it("evaluates a segment exactly as Codec.lerp(kind, a, b, Easing(alpha)) for every style", function()
 				local specs: { any } = {
-					{ "number", { name = "n", kind = "number", description = "" }, 2, -3 },
-					{ "vector3", { name = "v", kind = "vector3", description = "" }, { 1, 2, 3 }, { -4, 0, 8 } },
-					{ "color3", { name = "c", kind = "color3", description = "" }, "#102030", "#F0E0D0" },
+					R("number", { name = "n", kind = "number", description = "" }, 2, -3),
+					R("vector3", { name = "v", kind = "vector3", description = "" }, { 1, 2, 3 }, { -4, 0, 8 }),
+					R("color3", { name = "c", kind = "color3", description = "" }, "#102030", "#F0E0D0"),
 				}
 				for _, entry in specs do
 					local kind, spec, a, b = entry[1], entry[2], entry[3], entry[4]
@@ -378,11 +389,11 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				local r = Random.new(Random.hash(7, 0, "play", "rnd", 0)):range(5, 10)
 				local count = math.floor(r + 0.5)
 				T.expect(rows(list)).toEqual({
-					{ 0, "emit", "sparks", count, "graph" },
-					{ 0.25, "tween", "orb", 0, "graph" },
-					{ 0.75, "fire", "OrbDone", 0, "graph" },
-					{ 1, "disable", "sparks", 0, "graph" },
-					{ 1.25, "emit", "sparks", 8, "graph" },
+					R(0, "emit", "sparks", count, "graph"),
+					R(0.25, "tween", "orb", 0, "graph"),
+					R(0.75, "fire", "OrbDone", 0, "graph"),
+					R(1, "disable", "sparks", 0, "graph"),
+					R(1.25, "emit", "sparks", 8, "graph"),
 				})
 				local tween = list[2]
 				T.expect(tween.channel).toBe("transparency")
@@ -435,8 +446,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				end
 				local list = Graph.staticSchedule(Graph.compile(def.graph, def), 7, 0, effect)
 				T.expect(rows(list)).toEqual({
-					{ 0.25, "tween", "orb", 0, "graph" },
-					{ 0.75, "fire", "OrbDone", 0, "graph" },
+					R(0.25, "tween", "orb", 0, "graph"),
+					R(0.75, "fire", "OrbDone", 0, "graph"),
 				})
 			end)
 
@@ -453,7 +464,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 					},
 					links = { { from = "p.out", to = "s.in" } },
 				}
-				local list = Graph.run(Graph.compile(def.graph, def), { kind = "play" }, 0, 1, 0, effectFor(def, "High", 2))
+				local list =
+					Graph.run(Graph.compile(def.graph, def), { kind = "play" }, 0, 1, 0, effectFor(def, "High", 2))
 				local spec = Components.channelSpec("part", "size")
 				local tr = Curves.compileTrack(
 					{ id = "t", channel = "size", keyframes = { { time = 0, value = { 1, 4000, 0.0001 } } } },
@@ -467,65 +479,68 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(list[1].value).toBe(Vector3.new(2, 4096, 0.002))
 			end)
 
-			T.it("merges component events, marker events and graph actions into one schedule the Player can step", function()
-				local def = decodeEffect()
-				local components = compiledComponents(def)
-				local static = Timeline.staticSchedule(components, def.markers)
-				-- events at absolute start + time inside [start, end); "atEnd" lands exactly at the end and is dropped
-				T.expect(rows(static)).toEqual({
-					{ 0.25, "emit", "sparks", 20, "event" },
-					{ 1, "fire", "Impact", 0, "marker" },
-					{ 1.75, "emit", "sparks", 5, "event" },
-				})
-				local graphList = Graph.staticSchedule(Graph.compile(def.graph, def), 7, 0, effectFor(def, "High"))
-				-- Compiler-style merge: static actions first at equal times, then renumber and sort (stable)
-				local merged = {}
-				for _, a in static do
-					table.insert(merged, a)
-				end
-				for _, a in graphList do
-					table.insert(merged, a)
-				end
-				for i, a in merged do
-					a.order = i
-				end
-				Timeline.sort(merged)
-				local times = {}
-				for i, a in merged do
-					table.insert(times, a.time)
-					if i > 1 then
-						local p = merged[i - 1]
-						T.expect(p.time < a.time or (p.time == a.time and p.order < a.order)).toBe(true)
+			T.it(
+				"merges component events, marker events and graph actions into one schedule the Player can step",
+				function()
+					local def = decodeEffect()
+					local components = compiledComponents(def)
+					local static = Timeline.staticSchedule(components, def.markers)
+					-- events at absolute start + time inside [start, end); "atEnd" lands exactly at the end and is dropped
+					T.expect(rows(static)).toEqual({
+						R(0.25, "emit", "sparks", 20, "event"),
+						R(1, "fire", "Impact", 0, "marker"),
+						R(1.75, "emit", "sparks", 5, "event"),
+					})
+					local graphList = Graph.staticSchedule(Graph.compile(def.graph, def), 7, 0, effectFor(def, "High"))
+					-- Compiler-style merge: static actions first at equal times, then renumber and sort (stable)
+					local merged = {}
+					for _, a in static do
+						table.insert(merged, a)
 					end
-				end
-				T.expect(times).toEqual({ 0, 0.25, 0.25, 0.75, 1, 1, 1.25, 1.75 })
-				T.expect(merged[2].source).toBe("event") -- static before graph at 0.25
-				T.expect(merged[5].source).toBe("marker") -- and at 1
+					for _, a in graphList do
+						table.insert(merged, a)
+					end
+					for i, a in merged do
+						a.order = i
+					end
+					Timeline.sort(merged)
+					local times = {}
+					for i, a in merged do
+						table.insert(times, a.time)
+						if i > 1 then
+							local p = merged[i - 1]
+							T.expect(p.time < a.time or (p.time == a.time and p.order < a.order)).toBe(true)
+						end
+					end
+					T.expect(times).toEqual({ 0, 0.25, 0.25, 0.75, 1, 1, 1.25, 1.75 })
+					T.expect(merged[2].source).toBe("event") -- static before graph at 0.25
+					T.expect(merged[5].source).toBe("marker") -- and at 1
 
-				-- Player frames: actions at 0 run on start (includeStart), then (previous, t] per frame.
-				local executed: { [number]: number } = {}
-				local function run(first: number, last: number, t0: number, t1: number)
-					for i = first, last do
-						local a = merged[i]
-						T.expect(executed[i]).toBeNil()
-						T.expect(a.time >= t0 and a.time <= t1).toBe(true)
-						executed[i] = (executed[i] or 0) + 1
+					-- Player frames: actions at 0 run on start (includeStart), then (previous, t] per frame.
+					local executed: { [number]: number } = {}
+					local function run(first: number, last: number, t0: number, t1: number)
+						for i = first, last do
+							local a = merged[i]
+							T.expect(executed[i]).toBeNil()
+							T.expect(a.time >= t0 and a.time <= t1).toBe(true)
+							executed[i] = (executed[i] or 0) + 1
+						end
+					end
+					local first, last = Timeline.range(merged, 0, 0, true)
+					run(first, last, 0, 0)
+					local t = 0
+					local dt = 1 / 64
+					while t < def.duration do
+						local nextT = math.min(t + dt, def.duration)
+						local f, l = Timeline.range(merged, t, nextT, false)
+						run(f, l, t, nextT)
+						t = nextT
+					end
+					for i = 1, #merged do
+						T.expect(executed[i]).toBe(1)
 					end
 				end
-				local first, last = Timeline.range(merged, 0, 0, true)
-				run(first, last, 0, 0)
-				local t = 0
-				local dt = 1 / 64
-				while t < def.duration do
-					local nextT = math.min(t + dt, def.duration)
-					local f, l = Timeline.range(merged, t, nextT, false)
-					run(f, l, t, nextT)
-					t = nextT
-				end
-				for i = 1, #merged do
-					T.expect(executed[i]).toBe(1)
-				end
-			end)
+			)
 
 			T.it("runs an OnEvent flow from the current time and the Player picks it up with includeStart", function()
 				local def = decodeEffect()
@@ -533,7 +548,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				T.expect(Graph.triggers(compiled).events).toEqual({ "Detonate" })
 				local now = 1.1
 				local list = Graph.run(compiled, { kind = "event", id = "Detonate" }, now, 7, 0, effectFor(def, "High"))
-				T.expect(rows(list)).toEqual({ { now, "emit", "sparks", 3, "graph" } })
+				T.expect(rows(list)).toEqual({ R(now, "emit", "sparks", 3, "graph") })
 				local pending = Timeline.sort(list)
 				local f0, l0 = Timeline.range(pending, now, now + 1 / 60, false)
 				T.expect(l0 < f0).toBe(true) -- (now, now + dt] misses an action exactly at `now`

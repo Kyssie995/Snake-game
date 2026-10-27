@@ -855,23 +855,17 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				-- The SequenceEditor stores baked keypoints in the definition; saving and reloading it must not
 				-- change them (Json writes at most 6 decimals).
 				local cases: { any } = {
-					{ Easing.get("Sine", "In"), nil },
-					{ Easing.get("Bounce", "Out"), nil },
-					{ Easing.get("Elastic", "Out"), nil },
-					{
-						function(t: number): number
-							return 0.001 * t * t
-						end,
-						nil,
-					},
-					{
-						function(t: number): number
-							return math.sin(t * 5) * 3 + 1
-						end,
-						function(t: number): number
-							return 0.1234567 * t
-						end,
-					},
+					L(Easing.get("Sine", "In")),
+					L(Easing.get("Bounce", "Out")),
+					L(Easing.get("Elastic", "Out")),
+					L(function(t: number): number
+						return 0.001 * t * t
+					end),
+					L(function(t: number): number
+						return math.sin(t * 5) * 3 + 1
+					end, function(t: number): number
+						return 0.1234567 * t
+					end),
 				}
 				for i, case in cases do
 					local keys, err = Curves.bakeToSequenceKeypoints(case[1], 20, 1e-7, case[2])
