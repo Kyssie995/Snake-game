@@ -71,13 +71,14 @@ type ButtonData = {
 export type Button = typeof(setmetatable({} :: ButtonData, Button))
 
 local c = Theme.colors
+local derived = Kit.derived
 
 local function palette(variant: Variant): Palette
 	if variant == "primary" then
 		return {
 			bg = c.accent,
 			hover = c.accentHover,
-			press = c.accent:Lerp(c.bg0, 0.2),
+			press = derived.accentPressed,
 			transparency = 0,
 			text = c.text,
 			textHover = c.text,
@@ -85,9 +86,9 @@ local function palette(variant: Variant): Palette
 		}
 	elseif variant == "danger" then
 		return {
-			bg = c.error:Lerp(c.bg1, 0.15),
+			bg = derived.danger,
 			hover = c.error,
-			press = c.error:Lerp(c.bg0, 0.25),
+			press = derived.dangerPressed,
 			transparency = 0,
 			text = c.text,
 			textHover = c.text,
@@ -194,7 +195,7 @@ function Button._refresh(self: Button)
 	if not self._enabled then
 		root.BackgroundColor3 = if self._variant == "primary"
 			then c.accentDim
-			elseif self._variant == "danger" then c.error:Lerp(c.bg1, 0.6)
+			elseif self._variant == "danger" then derived.dangerDisabled
 			else c.bg2
 		root.BackgroundTransparency = p.transparency
 		root.TextColor3 = c.textMuted

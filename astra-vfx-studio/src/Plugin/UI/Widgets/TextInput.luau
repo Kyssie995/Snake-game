@@ -242,9 +242,16 @@ function TextInput.commit(self: TextInput, submitted: boolean?): boolean
 	return true
 end
 
--- Sets the text without firing callbacks (clears any error state).
+-- Sets the text without firing callbacks (clears any error state). While the user is typing (focused and the
+-- text differs from the last committed value) the typed text is kept and only the committed value changes, so
+-- an external update neither clobbers the edit nor gets overwritten by a stale commit.
 function TextInput.setValue(self: TextInput, text: string)
+	local editing = self._focused and self.box.Text ~= self._committed
 	self._committed = text
+	if editing then
+		self:_refresh()
+		return
+	end
 	self._lastText = text
 	self._error = nil
 	self.box.Text = text

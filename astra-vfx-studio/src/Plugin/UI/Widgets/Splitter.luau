@@ -38,6 +38,7 @@ export type Props = {
 	minSecond: number?, -- px (default 60)
 	dividerSize: number?, -- hit area thickness in px (default 6); the visible line is 1px
 	host: any?,
+	enabled: boolean?,
 	onChange: ((ratio: number, final: boolean) -> ())?,
 	name: string?,
 	size: UDim2?,
@@ -201,6 +202,9 @@ function Splitter.new(props: Props): Splitter
 	end))
 
 	self:_apply(initial)
+	if props.enabled == false then
+		self:setEnabled(false)
+	end
 	if props.parent then
 		root.Parent = props.parent
 	end
@@ -260,6 +264,8 @@ end
 function Splitter.getRatio(self: Splitter): number
 	return self._ratio
 end
+
+Splitter.getValue = Splitter.getRatio
 
 -- Sets the ratio (clamped by the min sizes) without firing onChange.
 function Splitter.setRatio(self: Splitter, ratio: number)

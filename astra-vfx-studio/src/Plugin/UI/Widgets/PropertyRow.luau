@@ -46,6 +46,7 @@ export type Props = {
 	labelWidth: number?, -- fraction (default Theme.metrics.labelWidth)
 	indent: number?, -- extra label indent in px (nested properties)
 	height: number?, -- default Theme.metrics.rowHeight
+	enabled: boolean?,
 	name: string?,
 	layoutOrder: number?,
 	parent: Instance?,
@@ -240,6 +241,9 @@ function PropertyRow.new(props: Props): PropertyRow
 	end
 	if props.field ~= nil then
 		self:setField(props.field)
+	end
+	if props.enabled == false then
+		self:setEnabled(false)
 	end
 	self:_refresh()
 	if props.parent then

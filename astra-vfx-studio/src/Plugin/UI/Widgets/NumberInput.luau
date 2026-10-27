@@ -21,6 +21,8 @@
 
 	Typing accepts arithmetic ("2*3", "1,5" with comma, "(4+2)/3"); invalid text and Escape revert. Values are
 	clamped to [min, max] and rounded to `precision` decimals (scrubbing keeps the decimals of the effective step).
+	setValue() while the field is focused but not yet edited updates the text, and leaving a field without typing
+	commits nothing, so an external change (e.g. Studio undo) is never overwritten by the stale focus-time text.
 	Scrubbing polls widget:GetRelativeMousePosition() every Heartbeat (UI/Input.drag) because UserInputService does
 	not work inside DockWidgets. Clicking the label part without dragging focuses the text field.
 ]]
@@ -73,6 +75,7 @@ type NumberInputData = {
 	_mixed: boolean,
 	_enabled: boolean,
 	_focused: boolean,
+	_focusText: string?, -- box text when focus was gained (nil while not focused)
 	_hovered: boolean,
 	_scrubHovered: boolean,
 	_dragging: boolean,
@@ -186,6 +189,7 @@ function NumberInput.new(props: Props): NumberInput
 		_mixed = false,
 		_enabled = props.enabled ~= false,
 		_focused = false,
+		_focusText = nil :: string?,
 		_hovered = false,
 		_scrubHovered = false,
 		_dragging = false,
@@ -198,13 +202,16 @@ function NumberInput.new(props: Props): NumberInput
 	-- typing
 	maid:give(box.Focused:Connect(function()
 		self._focused = true
-		box.Text = if self._mixed then "" else Kit.format(self._value, self._precision)
+		box.Text = self:_editText()
+		self._focusText = box.Text
 		box.SelectionStart = 1
 		box.CursorPosition = #box.Text + 1
 		self:_refresh()
 	end))
 	maid:give(box.FocusLost:Connect(function(_enterPressed: boolean, input: InputObject?)
 		self._focused = false
+		local untouched = box.Text == self._focusText
+		self._focusText = nil
 		local escape = false
 		if input ~= nil then
 			local ok, key = pcall(function()
@@ -212,7 +219,7 @@ function NumberInput.new(props: Props): NumberInput
 			end)
 			escape = ok and key == Enum.KeyCode.Escape
 		end
-		if not escape then
+		if not escape and not untouched then
 			self:_commitText(box.Text)
 		end
 		self:_refresh()
@@ -327,8 +334,20 @@ function NumberInput._normalize(self: NumberInput, value: number, decimals: numb
 	return v
 end
 
+-- Text shown while the field is focused for typing (no suffix; empty for mixed values).
+function NumberInput._editText(self: NumberInput): string
+	return if self._mixed then "" else Kit.format(self._value, self._precision)
+end
+
 function NumberInput._display(self: NumberInput)
 	if self._focused then
+		-- not edited yet: follow external value changes; otherwise keep what the user is typing
+		-- (only real changes are written: rewriting the text of a focused TextBox can reset caret and selection)
+		local text = self:_editText()
+		if self.box.Text == self._focusText and self.box.Text ~= text then
+			self._focusText = text
+			self.box.Text = text
+		end
 		return
 	end
 	if self._mixed then

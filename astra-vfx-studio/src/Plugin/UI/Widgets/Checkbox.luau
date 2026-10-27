@@ -56,6 +56,22 @@ export type Checkbox = typeof(setmetatable({} :: CheckboxData, Checkbox))
 local c = Theme.colors
 local BOX = 14
 
+local function makeLabel(root: TextButton, text: string): TextLabel
+	local l = Instance.new("TextLabel")
+	l.Name = "Label"
+	l.BackgroundTransparency = 1
+	l.Position = UDim2.fromOffset(BOX + 8, 0)
+	l.Size = UDim2.fromScale(0, 1)
+	l.AutomaticSize = Enum.AutomaticSize.X
+	l.FontFace = Theme.fonts.regular
+	l.TextSize = Theme.textSize.normal
+	l.TextColor3 = c.text
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.Text = text
+	l.Parent = root
+	return l
+end
+
 function Checkbox.new(props: Props): Checkbox
 	local maid = Maid.new()
 	local root = Instance.new("TextButton")
@@ -98,19 +114,7 @@ function Checkbox.new(props: Props): Checkbox
 
 	local label: TextLabel? = nil
 	if props.text and props.text ~= "" then
-		local l = Instance.new("TextLabel")
-		l.Name = "Label"
-		l.BackgroundTransparency = 1
-		l.Position = UDim2.fromOffset(BOX + 8, 0)
-		l.Size = UDim2.fromScale(0, 1)
-		l.AutomaticSize = Enum.AutomaticSize.X
-		l.FontFace = Theme.fonts.regular
-		l.TextSize = Theme.textSize.normal
-		l.TextColor3 = c.text
-		l.TextXAlignment = Enum.TextXAlignment.Left
-		l.Text = props.text
-		l.Parent = root
-		label = l
+		label = makeLabel(root, props.text)
 	end
 
 	local self = setmetatable({
@@ -198,9 +202,13 @@ function Checkbox.setMixed(self: Checkbox, mixed: boolean)
 	self:_refresh()
 end
 
+-- Changes the label text (creates the label when the checkbox was built without one).
 function Checkbox.setText(self: Checkbox, text: string)
 	if self.label then
 		self.label.Text = text
+	elseif text ~= "" then
+		self.label = makeLabel(self.instance, text)
+		self:_refresh()
 	end
 end
 

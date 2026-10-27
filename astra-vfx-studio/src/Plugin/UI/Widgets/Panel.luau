@@ -9,11 +9,17 @@
 		list.instance.Parent = panel.body
 		...
 		panel:destroy()                          -- also destroys the toolbar and everything given to panel:give()
+
+	The panel's root Frame is the `host.root` layer for popups, tooltips, toasts and dialogs (no layout objects, so
+	those overlays can be positioned freely). When the panel is parented directly to a LayerCollector (the
+	DockWidgetPluginGui), its ZIndexBehavior is set to Sibling (ControlKit.useSiblingZIndex), which the overlay
+	layering relies on.
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
 local New = require(script.Parent.Parent.New)
 local Maid = require(script.Parent.Parent.Maid)
+local Kit = require(script.Parent.ControlKit)
 
 local Panel = {}
 Panel.__index = Panel
@@ -25,6 +31,7 @@ export type Props = {
 	header: boolean?, -- false hides the header bar (default true)
 	padding: number?, -- body padding in px (default Theme.metrics.padding)
 	scroll: boolean?, -- body is a vertical ScrollingFrame with automatic canvas height
+	enabled: boolean?,
 	name: string?,
 	size: UDim2?,
 	position: UDim2?,
@@ -217,8 +224,15 @@ function Panel.new(props: Props): Panel
 	if props.toolbar ~= nil then
 		self:setToolbar(props.toolbar)
 	end
-	if props.parent then
-		root.Parent = props.parent
+	if props.enabled == false then
+		self:setEnabled(false)
+	end
+	local parent = props.parent
+	if parent then
+		if parent:IsA("LayerCollector") then
+			Kit.useSiblingZIndex(parent)
+		end
+		root.Parent = parent
 	end
 	return self
 end

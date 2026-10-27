@@ -125,7 +125,7 @@ local function build(host: Host, title: string, fixed: boolean): Built
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
 	panel.Position = UDim2.fromScale(0.5, 0.5)
 	panel.Active = true
-	Kit.corner(6).Parent = panel
+	Kit.corner().Parent = panel
 	Kit.stroke(c.borderStrong).Parent = panel
 	local constraint = Instance.new("UISizeConstraint")
 	panel.Parent = overlay

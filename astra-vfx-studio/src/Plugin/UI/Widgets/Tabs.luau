@@ -5,7 +5,7 @@
 		local tabs = Tabs.new({
 			tabs = { { id = "props", text = "Eigenschaften" }, { id = "events", text = "Events", icon = "⚡" } },
 			selected = "props",                         -- default: first tab
-			onChange = function(id) settings:set("inspectorTab", id) end,
+			onChange = function(id, final) settings:set("inspectorTab", id) end, -- final is always true
 			parent = panel.body,
 		})
 		propertyList.Parent = tabs:page("props")
@@ -29,7 +29,8 @@ export type TabSpec = { id: string, text: string, icon: string?, badge: string? 
 export type Props = {
 	tabs: { TabSpec }?,
 	selected: string?,
-	onChange: ((id: string) -> ())?,
+	onChange: ((id: string, final: boolean) -> ())?,
+	enabled: boolean?,
 	stripHeight: number?, -- default Theme.metrics.headerHeight
 	name: string?,
 	size: UDim2?,
@@ -130,6 +131,9 @@ function Tabs.new(props: Props): Tabs
 	if initial then
 		self:setValue(initial)
 	end
+	if props.enabled == false then
+		self:setEnabled(false)
+	end
 	if props.parent then
 		root.Parent = props.parent
 	end
@@ -186,6 +190,7 @@ function Tabs._refreshTab(self: Tabs, entry: TabEntry)
 		elseif selected then Theme.colors.text
 		else Theme.colors.textDim
 	button.FontFace = if selected then Theme.fonts.medium else Theme.fonts.regular
+	button.Interactable = self._enabled
 	button.Text = tabText(entry.spec)
 	local underline = button:FindFirstChild("Underline") :: Frame
 	underline.Visible = selected
@@ -315,7 +320,7 @@ function Tabs.select(self: Tabs, id: string)
 	end
 	self:setValue(id)
 	if self._props.onChange then
-		self._props.onChange(id)
+		self._props.onChange(id, true)
 	end
 end
 

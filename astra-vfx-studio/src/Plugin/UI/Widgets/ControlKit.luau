@@ -43,6 +43,16 @@ ControlKit.FONT_ENUM = {
 
 ControlKit.FALLBACK_SIZE = 100
 
+-- Derived state colours (pressed/disabled variants) computed from Theme tokens. Widgets use Theme.colors or these,
+-- never literal colours, so a palette change in Theme carries through.
+local tokens = Theme.colors
+ControlKit.derived = {
+	accentPressed = tokens.accent:Lerp(tokens.bg0, 0.2),
+	danger = tokens.error:Lerp(tokens.bg1, 0.15),
+	dangerPressed = tokens.error:Lerp(tokens.bg0, 0.25),
+	dangerDisabled = tokens.error:Lerp(tokens.bg1, 0.6),
+}
+
 function ControlKit.corner(radius: number?): UICorner
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius or Theme.metrics.corner)
@@ -109,6 +119,20 @@ function ControlKit.mouseInRoot(host: Host): Vector2
 	return mouse - rootPos
 end
 
+--[[
+	Layering contract: popups, tooltips, toasts and dialogs are children of host.root with a high ZIndex (Kit.Z).
+	ASTRA widgets use ZIndexBehavior.Sibling semantics: a child always draws above its parent and ZIndex only orders
+	siblings, so a layer in host.root covers the panel content whatever ZIndex values the content uses. Call this
+	once on every DockWidgetPluginGui (Panel.new does it when it is parented directly to a LayerCollector).
+	Returns true when the property was set.
+]]
+function ControlKit.useSiblingZIndex(layer: any): boolean
+	local ok = pcall(function()
+		layer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	end)
+	return ok
+end
+
 -- Sets ZIndex on `root` and every GuiObject below it (z + depth), so popups stay on top in both
 -- ZIndexBehavior.Sibling and ZIndexBehavior.Global.
 function ControlKit.raise(root: Instance, z: number)
@@ -130,7 +154,7 @@ function ControlKit.measure(text: string, textSize: number, maxWidth: number?, f
 			text,
 			textSize,
 			font or ControlKit.FONT_ENUM.regular,
-			Vector2.new(maxWidth or 10000, 10000)
+			Vector2.new(maxWidth or 100000, 1000000)
 		)
 	end)
 	if ok and typeof(size) == "Vector2" then

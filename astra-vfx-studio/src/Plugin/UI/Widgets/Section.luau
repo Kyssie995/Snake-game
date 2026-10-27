@@ -30,6 +30,7 @@ export type Props = {
 	onToggle: ((expanded: boolean) -> ())?,
 	spacing: number?, -- gap between body rows (default 2)
 	padding: number?, -- body padding (default Theme.metrics.paddingSmall)
+	enabled: boolean?,
 	name: string?,
 	layoutOrder: number?,
 	parent: Instance?,
@@ -172,6 +173,9 @@ function Section.new(props: Props): Section
 		self:_refresh()
 	end))
 
+	if props.enabled == false then
+		self:setEnabled(false)
+	end
 	self:_refresh()
 	if props.parent then
 		root.Parent = props.parent
@@ -220,6 +224,8 @@ end
 function Section.isExpanded(self: Section): boolean
 	return self._expanded
 end
+
+Section.getValue = Section.isExpanded
 
 -- Expands/collapses without calling onToggle.
 function Section.setExpanded(self: Section, expanded: boolean)

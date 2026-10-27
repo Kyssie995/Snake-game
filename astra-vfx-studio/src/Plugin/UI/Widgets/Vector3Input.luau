@@ -7,8 +7,8 @@
 			value = { 0, 2, 0 },
 			step = 0.1, precision = 3, min = -1000, max = 1000,  -- applied to every axis
 			host = host,                                        -- enables drag-scrubbing on the axis labels
-			onChange = function(vector, final)                  -- vector is a fresh { x, y, z } array
-				if final then editor:transact("Offset", ...) end
+			onChange = function(vector, final, axis)            -- vector is a fresh { x, y, z } array,
+				if final then editor:transact("Offset", ...) end  -- axis the index that was edited (1..3)
 			end,
 			parent = row,
 		})
@@ -16,7 +16,8 @@
 		offset:setMixed({ false, true, false })                 -- "—" on axes that differ in a multi-selection
 
 	Each axis is a NumberInput (drag-scrub label + typed arithmetic). onChange(value, false) streams while
-	scrubbing, onChange(value, true) once at the end and for typed values.
+	scrubbing, onChange(value, true) once at the end and for typed values. The third argument is the edited axis
+	index, so multi-selection editors can apply only that component (the other entries may be "mixed").
 
 	Vector3Input.group(props, axes, constrain?) is the shared builder behind Vector2Input and NumberRangeInput:
 	`axes` = { { label, color } }, `constrain(values, changedIndex) -> values` may adjust the other entries.
@@ -41,7 +42,7 @@ export type Props = {
 	labels: { string }?, -- overrides the axis labels
 	host: any?,
 	enabled: boolean?,
-	onChange: ((value: { number }, final: boolean) -> ())?,
+	onChange: ((value: { number }, final: boolean, axis: number) -> ())?,
 	spacing: number?, -- gap between fields (default 4)
 	name: string?,
 	size: UDim2?,
@@ -179,7 +180,7 @@ function Vector3Input._axisChanged(self: VectorInput, index: number, value: numb
 	end
 	self._values = values
 	if self._props.onChange then
-		self._props.onChange(table.clone(values), final)
+		self._props.onChange(table.clone(values), final, index)
 	end
 end
 

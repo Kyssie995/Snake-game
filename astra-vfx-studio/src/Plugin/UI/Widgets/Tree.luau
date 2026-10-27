@@ -22,6 +22,8 @@
 	Selection modes passed to onSelect (they match Editor:select): plain click → ({id}, "replace"); Ctrl → ({id},
 	"toggle"); Shift → (range from the anchor, "replace"); Ctrl+Shift → (range, "add"); click on empty space →
 	({}, "replace"). Right click on an unselected row selects it first.
+	onSelect also receives the click modifiers ({ ctrl, shift, alt }) as a fourth argument.
+	Keyboard: tree:handleKey(keyCode, mods) from the panel's input catcher (arrows, Home/End, F2).
 	Drag & drop (needs props.host and onDragDrop): dragging a selected row drags the whole visible selection.
 	"inside" is offered for rows with `droppable = true` (default: `expandable`). Dropping onto a dragged row or
 	one of its descendants is rejected; `canDrop(ids, targetId, position)` can veto further targets.
@@ -32,6 +34,7 @@ local New = require(script.Parent.Parent.New)
 local Maid = require(script.Parent.Parent.Maid)
 local Input = require(script.Parent.Parent.Input)
 local ScrollList = require(script.Parent.ScrollList)
+local Kit = require(script.Parent.ControlKit)
 
 local Tree = {}
 Tree.__index = Tree
@@ -60,13 +63,14 @@ export type Props = {
 	rowHeight: number?,
 	indent: number?,
 	onToggle: ((id: string, expanded: boolean) -> ())?,
-	onSelect: ((ids: { string }, mode: SelectMode, clickedId: string?) -> ())?,
+	onSelect: ((ids: { string }, mode: SelectMode, clickedId: string?, mods: Input.Mods) -> ())?,
 	onActivate: ((id: string) -> ())?, -- double click when no onRename is given
 	onRename: ((id: string, newLabel: string) -> ())?,
 	onContext: ((id: string?, input: InputObject) -> ())?,
 	onDragDrop: ((ids: { string }, targetId: string, position: DropPosition) -> ())?,
 	canDrop: ((ids: { string }, targetId: string, position: DropPosition) -> boolean)?,
 	emptyText: string?,
+	enabled: boolean?,
 	name: string?,
 	size: UDim2?,
 	position: UDim2?,
@@ -76,6 +80,7 @@ export type Props = {
 
 type DragState = {
 	ids: { string },
+	excluded: { [string]: boolean }, -- dragged rows and their (flattened) descendants: never valid targets
 	targetId: string?,
 	position: DropPosition?,
 	valid: boolean,
@@ -89,7 +94,8 @@ type TreeData = {
 	_props: Props,
 	_items: { TreeItem },
 	_indexById: { [string]: number },
-	_anchor: string?,
+	_anchor: string?, -- fixed end of shift ranges
+	_cursor: string?, -- moving end (keyboard navigation)
 	_pendingClick: string?,
 	_drag: DragState?,
 	_renaming: { id: string, box: TextBox }?,
@@ -195,6 +201,7 @@ function Tree.new(props: Props): Tree
 		_items = {},
 		_indexById = {},
 		_anchor = nil,
+		_cursor = nil,
 		_pendingClick = nil,
 		_drag = nil,
 		_renaming = nil,
@@ -210,10 +217,15 @@ function Tree.new(props: Props): Tree
 		self:_backgroundInput(input)
 	end))
 
-	self:refresh()
+	-- parent first so the first visible-range estimate sees the real size
 	if props.parent then
 		root.Parent = props.parent
 	end
+	if props.enabled == false then
+		self._enabled = false
+		self.list:setEnabled(false)
+	end
+	self:refresh()
 	return self
 end
 
@@ -233,6 +245,10 @@ function Tree.refresh(self: Tree)
 		self:endRename(false)
 	end
 	self._emptyLabel.Visible = #items == 0 and (self._props.emptyText or "") ~= ""
+	local drag = self._drag
+	if drag then
+		drag.excluded = self:_excludedSet(drag.ids)
+	end
 	self.list:setCount(#items)
 	if self._renaming then
 		self:_placeRenameBox()
@@ -443,9 +459,10 @@ function Tree._toggle(self: Tree, index: number)
 	self:refresh()
 end
 
-function Tree._emitSelect(self: Tree, ids: { string }, mode: SelectMode, clickedId: string?)
+function Tree._emitSelect(self: Tree, ids: { string }, mode: SelectMode, clickedId: string?, mods: Input.Mods?)
+	self._cursor = clickedId
 	if self._props.onSelect then
-		self._props.onSelect(ids, mode, clickedId)
+		self._props.onSelect(ids, mode, clickedId, mods or NO_MODS())
 	end
 	self:refresh()
 end
@@ -463,13 +480,13 @@ function Tree._click(self: Tree, index: number, mods: Input.Mods)
 		for i = a, b do
 			table.insert(ids, self._items[i].id)
 		end
-		self:_emitSelect(ids, if mods.ctrl then "add" else "replace", item.id)
+		self:_emitSelect(ids, if mods.ctrl then "add" else "replace", item.id, mods)
 	elseif mods.ctrl then
 		self._anchor = item.id
-		self:_emitSelect({ item.id }, "toggle", item.id)
+		self:_emitSelect({ item.id }, "toggle", item.id, mods)
 	else
 		self._anchor = item.id
-		self:_emitSelect({ item.id }, "replace", item.id)
+		self:_emitSelect({ item.id }, "replace", item.id, mods)
 	end
 end
 
@@ -565,6 +582,10 @@ function Tree._backgroundInput(self: Tree, input: InputObject)
 		local p = input.Position
 		pos = Vector2.new(p.X, p.Y)
 	end
+	local framePos, frameSize = Kit.geometry(self.list.instance)
+	if pos.X >= framePos.X + frameSize.X - Theme.metrics.scrollBar - 2 then
+		return -- scroll bar
+	end
 	local canvas = self.list:toCanvas(pos)
 	if canvas.Y < #self._items * self.list.rowHeight then
 		return -- a row handles it
@@ -578,6 +599,86 @@ function Tree._backgroundInput(self: Tree, input: InputObject)
 	elseif self._props.onContext then
 		self._props.onContext(nil, input)
 	end
+end
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- keyboard
+
+-- Selects items[index] like a click (shift extends the range from the anchor) and scrolls it into view.
+function Tree._moveTo(self: Tree, index: number, shift: boolean)
+	local item = self._items[index]
+	if not item then
+		return
+	end
+	self.list:scrollToIndex(index)
+	local anchorIndex = if self._anchor then self._indexById[self._anchor :: string] else nil
+	if shift and anchorIndex then
+		local a, b = math.min(anchorIndex, index), math.max(anchorIndex, index)
+		local ids = {}
+		for i = a, b do
+			table.insert(ids, self._items[i].id)
+		end
+		self:_emitSelect(ids, "replace", item.id, { ctrl = false, shift = true, alt = false })
+	else
+		self._anchor = item.id
+		self:_emitSelect({ item.id }, "replace", item.id)
+	end
+end
+
+--[[
+	Keyboard navigation for the panel's input catcher (UI/Input.onKey). Returns true when the key was handled.
+	Up/Down move the selection (Shift extends it), Home/End jump, Left collapses or goes to the parent, Right
+	expands or goes to the first child, F2 renames.
+]]
+function Tree.handleKey(self: Tree, keyCode: Enum.KeyCode, mods: Input.Mods?): boolean
+	if not self._enabled or self._renaming or #self._items == 0 then
+		return false
+	end
+	local m: Input.Mods = mods or NO_MODS()
+	local count = #self._items
+	local current = if self._cursor then self._indexById[self._cursor :: string] else nil
+	if current == nil then
+		for i, item in self._items do
+			if item.selected then
+				current = i
+				break
+			end
+		end
+	end
+	if keyCode == Enum.KeyCode.Down then
+		self:_moveTo(if current then math.min(count, current + 1) else 1, m.shift)
+	elseif keyCode == Enum.KeyCode.Up then
+		self:_moveTo(if current then math.max(1, current - 1) else count, m.shift)
+	elseif keyCode == Enum.KeyCode.Home then
+		self:_moveTo(1, m.shift)
+	elseif keyCode == Enum.KeyCode.End then
+		self:_moveTo(count, m.shift)
+	elseif keyCode == Enum.KeyCode.Left and current then
+		local item = self._items[current]
+		if item.expandable and item.expanded then
+			self:_toggle(current)
+		else
+			local depth = item.depth or 0
+			for i = current - 1, 1, -1 do
+				if (self._items[i].depth or 0) < depth then
+					self:_moveTo(i, false)
+					break
+				end
+			end
+		end
+	elseif keyCode == Enum.KeyCode.Right and current then
+		local item = self._items[current]
+		if item.expandable and not item.expanded then
+			self:_toggle(current)
+		elseif item.expandable and current < count then
+			self:_moveTo(current + 1, false)
+		end
+	elseif keyCode == Enum.KeyCode.F2 and current then
+		self:beginRename(self._items[current].id)
+	else
+		return false
+	end
+	return true
 end
 
 -- ---------------------------------------------------------------------------------------------------------------
@@ -600,35 +701,43 @@ function Tree._dragStart(self: Tree, row: TextButton)
 		ids = { item.id }
 	end
 	self._pendingClick = nil
-	self._drag = { ids = ids, targetId = nil, position = nil, valid = false }
+	self._drag = { ids = ids, excluded = self:_excludedSet(ids), targetId = nil, position = nil, valid = false }
 	self.list:refresh()
+end
+
+-- Ids of the dragged rows and all rows below them in the flattened order (their descendants). One O(n) pass at
+-- drag start (and on refresh during a drag), so validating a target per mouse move is O(1).
+function Tree._excludedSet(self: Tree, ids: { string }): { [string]: boolean }
+	local dragged: { [string]: boolean } = {}
+	for _, id in ids do
+		dragged[id] = true
+	end
+	local excluded: { [string]: boolean } = {}
+	local subtreeDepth: number? = nil -- depth of the dragged row whose subtree is being walked
+	for _, item in self._items do
+		local depth = item.depth or 0
+		if subtreeDepth ~= nil and depth <= subtreeDepth then
+			subtreeDepth = nil
+		end
+		if subtreeDepth ~= nil then
+			excluded[item.id] = true
+		elseif dragged[item.id] then
+			excluded[item.id] = true
+			subtreeDepth = depth
+		end
+	end
+	return excluded
 end
 
 -- true when items[index] is one of the dragged rows or a descendant of one (in the flattened order).
 function Tree._isDraggedOrDescendant(self: Tree, index: number, ids: { string }): boolean
-	local items = self._items
-	for _, id in ids do
-		local start = self._indexById[id]
-		if start then
-			if start == index then
-				return true
-			end
-			if index > start then
-				local baseDepth = items[start].depth or 0
-				local inside = true
-				for i = start + 1, index do
-					if (items[i].depth or 0) <= baseDepth then
-						inside = false
-						break
-					end
-				end
-				if inside then
-					return true
-				end
-			end
-		end
+	local item = self._items[index]
+	if item == nil then
+		return false
 	end
-	return false
+	local drag = self._drag
+	local excluded = if drag and drag.ids == ids then drag.excluded else self:_excludedSet(ids)
+	return excluded[item.id] == true
 end
 
 -- Computes target row and drop position for a widget-relative mouse position.

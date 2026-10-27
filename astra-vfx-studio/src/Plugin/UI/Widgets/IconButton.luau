@@ -13,6 +13,8 @@
 			parent = toolbar,
 		})
 		loop:setValue(true)                  -- updates the toggled look without callbacks
+
+	`size` is the edge length in px (number); a UDim2 is accepted too, like the `size` prop of the other widgets.
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -23,7 +25,7 @@ local Tooltip = require(script.Parent.Tooltip)
 export type Props = {
 	glyph: string?,
 	image: string?,
-	size: number?, -- edge length in px (default rowHeight)
+	size: (number | UDim2)?, -- edge length in px (default rowHeight) or an explicit UDim2
 	glyphSize: number?,
 	tooltip: string?,
 	host: Kit.Host?,
@@ -61,12 +63,17 @@ local c = Theme.colors
 
 function IconButton.new(props: Props): IconButton
 	local maid = Maid.new()
-	local edge = props.size or Theme.metrics.rowHeight
+	local sizeProp: any = props.size
+	local explicit: UDim2? = if typeof(sizeProp) == "UDim2" then sizeProp else nil
+	local edge: number = if type(sizeProp) == "number"
+		then sizeProp
+		elseif explicit and explicit.Y.Offset > 0 then explicit.Y.Offset
+		else Theme.metrics.rowHeight
 	local root = Instance.new("TextButton")
 	root.Name = "IconButton"
 	root.AutoButtonColor = false
 	root.BorderSizePixel = 0
-	root.Size = UDim2.fromOffset(edge, edge)
+	root.Size = explicit or UDim2.fromOffset(edge, edge)
 	root.FontFace = Theme.fonts.medium
 	root.TextSize = props.glyphSize or Theme.textSize.title
 	root.Text = if props.image then "" else (props.glyph or "")

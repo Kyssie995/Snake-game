@@ -5,7 +5,7 @@
 
 		local bar = Toolbar.new({
 			items = {
-				IconButton.new({ icon = "▶", tooltip = "Play", onActivate = play }),
+				IconButton.new({ glyph = "▶", tooltip = "Play", host = host, onActivate = play }),
 				"separator",
 				Button.new({ text = "Export", onActivate = export }),
 				"spacer",                                  -- pushes the following items to the right
@@ -36,6 +36,7 @@ export type Props = {
 	autoWidth: boolean?,
 	padding: number?, -- gap between items (default 2)
 	background: boolean?, -- draw bg1 + bottom border (default true unless autoWidth)
+	enabled: boolean?, -- false disables every item (also items added later)
 	name: string?,
 	position: UDim2?,
 	layoutOrder: number?,
@@ -112,6 +113,9 @@ function Toolbar.new(props: Props): Toolbar
 		_destroyed = false,
 	}, Toolbar)
 
+	if props.enabled == false then
+		self._enabled = false
+	end
 	local items: { any } = props.items or {}
 	for _, item in items do
 		self:add(item)
@@ -143,8 +147,12 @@ function Toolbar.add(self: Toolbar, item: any): any
 	gui.Parent = self.content
 	table.insert(self.items, item)
 	self.maid:give(item)
-	if not self._enabled and type(item) == "table" and type(item.setEnabled) == "function" then
-		item:setEnabled(false)
+	if not self._enabled then
+		if type(item) == "table" and type(item.setEnabled) == "function" then
+			item:setEnabled(false)
+		else
+			gui.Interactable = false
+		end
 	end
 	return item
 end

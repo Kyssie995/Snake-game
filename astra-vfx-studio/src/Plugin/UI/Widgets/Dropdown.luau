@@ -17,8 +17,9 @@
 		blend:setOptions({ "A", "B" })
 
 	The popup shows a search filter when there are more than `searchThreshold` (8) options. It closes on a choice,
-	on a click outside (full-size transparent overlay in host.root), when the widget loses focus, on setEnabled(false)
-	and on destroy(). Keyboard navigation is not required. Options may also be positional ({ value, label, desc }).
+	on a click outside (full-size transparent overlay in host.root), when the widget loses focus, on setEnabled(false),
+	on destroy() and when the button instance is destroyed with an ancestor (Destroying), so no orphaned overlay keeps
+	swallowing clicks. Keyboard navigation is not required. Options may also be positional ({ value, label, desc }).
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -191,6 +192,9 @@ function Dropdown.new(props: Props): Dropdown
 		else
 			self:open()
 		end
+	end))
+	maid:give(root.Destroying:Connect(function()
+		self:close()
 	end))
 	maid:give(function()
 		self:close()

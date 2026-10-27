@@ -4,14 +4,15 @@
 
 		local search = SearchBox.new({
 			placeholder = "Komponenten suchen…",
-			onChange = function(text) library:filter(text) end, -- every change (GetPropertyChangedSignal("Text"))
+			onChange = function(text, final) library:filter(text) end, -- every change; final is always true
 			onSubmit = function(text) end,   -- optional: Enter
 			parent = toolbar,
 		})
 		search:setValue("")                   -- display only, no callbacks
 		search:clear()                        -- empties the field and fires onChange("")
 
-	Escape clears the field. The magnifier is drawn from Frames (no font glyph dependency).
+	Escape clears the field. The magnifier is drawn from Frames (no font glyph dependency). onChange follows the
+	widget contract onChange(value, final): each text change is a complete filter value, so final is always true.
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -23,7 +24,7 @@ export type Props = {
 	placeholder: string?,
 	size: UDim2?,
 	enabled: boolean?,
-	onChange: ((text: string) -> ())?,
+	onChange: ((text: string, final: boolean) -> ())?,
 	onSubmit: ((text: string) -> ())?,
 	name: string?,
 	layoutOrder: number?,
@@ -212,7 +213,7 @@ function SearchBox._sync(self: SearchBox)
 	end
 	self._lastText = text
 	if self._props.onChange then
-		self._props.onChange(text)
+		self._props.onChange(text, true)
 	end
 end
 

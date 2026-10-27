@@ -48,6 +48,7 @@ export type Props = {
 	onHoverChanged: ((index: number?) -> ())?,
 	buffer: number?, -- extra rows above and below the visible range (default 4)
 	viewportHeight: number?, -- fallback height when AbsoluteSize cannot be read
+	enabled: boolean?,
 	name: string?,
 	size: UDim2?,
 	position: UDim2?,
@@ -147,6 +148,9 @@ function ScrollList.new(props: Props): ScrollList
 		self:_update(false)
 	end))
 
+	if props.enabled == false then
+		self:setEnabled(false)
+	end
 	if props.parent then
 		frame.Parent = props.parent
 	end
@@ -257,6 +261,9 @@ function ScrollList._update(self: ScrollList, all: boolean)
 		self._rowIndex[row] = nil
 		row.Visible = false
 		table.insert(self._pool, row)
+		if self.hoverIndex == index then
+			self.hoverIndex = nil -- the row moves away from under the mouse without a MouseLeave
+		end
 	end
 	if self.hoverIndex and (self.hoverIndex :: number) > count then
 		self.hoverIndex = nil

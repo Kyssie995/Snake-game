@@ -65,6 +65,7 @@ type SliderData = {
 	_dragging: boolean,
 	_dragChanged: boolean,
 	_focused: boolean,
+	_focusText: string?, -- value box text when focus was gained
 	_boxStroke: UIStroke?,
 }
 
@@ -171,6 +172,7 @@ function Slider.new(props: Props): Slider
 		_dragging = false,
 		_dragChanged = false,
 		_focused = false,
+		_focusText = nil :: string?,
 		_boxStroke = boxStroke,
 	}, Slider)
 	self._value = self:_normalize(props.value or self._min, true)
@@ -218,12 +220,16 @@ function Slider.new(props: Props): Slider
 		maid:give(box.Focused:Connect(function()
 			self._focused = true
 			box.Text = Kit.format(self._value, self._precision)
+			self._focusText = box.Text
 			box.SelectionStart = 1
 			box.CursorPosition = #box.Text + 1
 			self:_refresh()
 		end))
 		maid:give(box.FocusLost:Connect(function(_enterPressed: boolean, input: InputObject?)
 			self._focused = false
+			-- leaving without typing commits nothing (the value may have changed externally meanwhile)
+			local untouched = box.Text == self._focusText
+			self._focusText = nil
 			local escape = false
 			if input ~= nil then
 				local ok, key = pcall(function()
@@ -231,7 +237,7 @@ function Slider.new(props: Props): Slider
 				end)
 				escape = ok and key == Enum.KeyCode.Escape
 			end
-			local parsed = if escape then nil else Kit.evaluate(box.Text)
+			local parsed = if escape or untouched then nil else Kit.evaluate(box.Text)
 			if parsed ~= nil then
 				local value = self:_normalize(parsed, false)
 				if value ~= self._value then
@@ -311,8 +317,14 @@ function Slider._refresh(self: Slider)
 	if box then
 		box.TextEditable = enabled
 		box.TextColor3 = if enabled then c.text else c.textMuted
+		local text = Kit.format(self._value, self._precision)
 		if not self._focused then
-			box.Text = Kit.format(self._value, self._precision)
+			box.Text = text
+		elseif box.Text == self._focusText and box.Text ~= text then
+			-- focused but not edited yet: follow external value changes (only real changes are written, rewriting
+			-- the text of a focused TextBox can reset caret and selection)
+			self._focusText = text
+			box.Text = text
 		end
 		local stroke = self._boxStroke
 		if stroke then

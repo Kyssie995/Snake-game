@@ -236,6 +236,8 @@ function ColorSwatch.setValue(self: ColorSwatch, value: any)
 	local showText = self._props.showText ~= false
 
 	if sequence then
+		-- UIGradient multiplies the background colour, so the chip must be pure white to show the gradient as-is
+		-- (a technical neutral, not a theme colour).
 		self.chip.BackgroundColor3 = Color3.new(1, 1, 1)
 		self.gradient.Color = sequence
 		self.gradient.Enabled = true
@@ -308,8 +310,8 @@ function ColorSwatch.destroy(self: ColorSwatch)
 	self.instance:Destroy()
 end
 
--- Kit is used for geometry by pickers that anchor to the swatch.
-ColorSwatch.geometry = function(self: ColorSwatch): (Vector2, Vector2)
+-- Absolute position and size of the swatch (pickers anchor their popup to it).
+function ColorSwatch.geometry(self: ColorSwatch): (Vector2, Vector2)
 	return Kit.geometry(self.instance)
 end
 

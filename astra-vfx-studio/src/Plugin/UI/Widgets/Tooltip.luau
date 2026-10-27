@@ -9,7 +9,8 @@
 
 	Built on MouseEnter/MouseLeave and a cancellable task.delay (UserInputService does not work in widgets).
 	Only one tooltip is visible per host; it is parented to host.root, positioned at the mouse
-	(widget:GetRelativeMousePosition) and clamped into the root. Pressing a mouse button over the target hides it.
+	(widget:GetRelativeMousePosition) and clamped into the root. Pressing a mouse button over the target hides it,
+	and so does destroying the target (Destroying), even when the owner forgets to disconnect the handle.
 	A text function returning nil or "" shows nothing.
 ]]
 
@@ -187,6 +188,14 @@ function Tooltip.attach(host: Host, gui: GuiObject, text: TextSource, options: O
 				cancelPending()
 				hideOwn()
 			end
+		end)
+	)
+	table.insert(
+		connections,
+		gui.Destroying:Connect(function()
+			hovered = false
+			cancelPending()
+			hideOwn()
 		end)
 	)
 
