@@ -1,0 +1,21 @@
+{
+	"name": "AstraFixture",
+	"tree": {
+		"$className": "Folder",
+		"Lib": {
+			"$path": "src"
+		},
+		"Tools": {
+			"$className": "Folder",
+			"Consumer": {
+				"$path": "project/Consumer.luau"
+			},
+			"Misnamed": {
+				"$path": "project/Misnamed.luau"
+			},
+			"Settings": {
+				"$path": "project/settings.json"
+			}
+		}
+	}
+}

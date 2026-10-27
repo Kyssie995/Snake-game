@@ -46,6 +46,9 @@ add_executable(astra-analyze
     src/main.cpp
     src/RojoTree.cpp
     src/RobloxMagic.cpp
+    src/RobloxMagic.h
+    src/RojoTree.h
+    src/Json.h
 )
 target_compile_features(astra-analyze PRIVATE cxx_std_17)
 target_include_directories(astra-analyze PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")

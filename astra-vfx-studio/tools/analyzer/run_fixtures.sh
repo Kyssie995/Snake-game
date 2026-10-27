@@ -11,6 +11,9 @@
 #   3. Zusaetzliche Textfragmente (Tippfehler-Vorschlag, modulübergreifender Typ, ...) sind enthalten.
 #   4. Shared/Loose.luau (--!nonstrict) ist im Standardlauf fehlerfrei, mit --force-strict nicht.
 #   5. --json liefert gueltiges JSON mit identischen Fehlern.
+#   6. --project default.project.json: Instanznamen aus der Projektdatei ("Lib" = src/, "Tools" = $className-Folder,
+#      Einzeldatei-$path, JSON-Modul). Gute Dateien inkl. project/Consumer.luau fehlerfrei; Fehler nur in
+#      Broken.luau und project/Misnamed.luau (Verzeichnisname statt Instanzname), jeweils exakt wie markiert.
 # Alles wird fuer den alten (Standard) und den neuen Luau-Solver geprueft.
 
 set -u
@@ -44,8 +47,30 @@ pass() {
     echo "  ok:   $*"
 }
 
-# Erwartete (Zeile, Code)-Paare aus den Markierungen in Broken.luau
-grep -n -- '-- EXPECT ' "$BROKEN" | sed -E 's/^([0-9]+):.*-- EXPECT ([A-Za-z]+).*/\1 \2/' | sort -u >"$TMP/expected.txt"
+MISNAMED="project/Misnamed.luau"
+
+# Erwartete "Datei Zeile Code"-Tripel aus den "-- EXPECT <Code>"-Markierungen der angegebenen Dateien
+expected_for() {
+    for f in "$@"; do
+        grep -n -- '-- EXPECT ' "$f" | sed -E "s|^([0-9]+):.*-- EXPECT ([A-Za-z]+).*|$f \\1 \\2|"
+    done | sort -u
+}
+# Tatsaechliche "Datei Zeile Code"-Tripel aller Fehler einer Textausgabe
+actual_errors() {
+    grep -E '^[^:]+:[0-9]+:[0-9]+: error: ' "$1" | sed -E 's/^([^:]+):([0-9]+):[0-9]+: error: .*\[([A-Za-z]+)\]$/\1 \2 \3/' | sort -u
+}
+compare_errors() { # $1 = Ausgabe, Rest = Dateien mit EXPECT-Markierungen
+    local out="$1"
+    shift
+    expected_for "$@" >"$TMP/expected.txt"
+    actual_errors "$out" >"$TMP/actual.txt"
+    if diff -u "$TMP/expected.txt" "$TMP/actual.txt" >"$TMP/diff.txt"; then
+        pass "Fehler (Datei, Zeile, Code) entsprechen exakt den EXPECT-Markierungen ($(wc -l <"$TMP/expected.txt") Stellen)"
+    else
+        fail "Fehler weichen von den EXPECT-Markierungen ab (- erwartet, + tatsaechlich):"
+        sed 's/^/        /' "$TMP/diff.txt"
+    fi
+}
 
 GOOD_FILES=$(find src -type f \( -name '*.luau' -o -name '*.lua' \) ! -path "$BROKEN" | sort)
 
@@ -72,21 +97,7 @@ for SOLVER in $SOLVERS; do
     echo "  ---"
     if [ $rc -eq 1 ]; then pass "Gesamtlauf: Exit 1"; else fail "Gesamtlauf: Exit $rc (erwartet 1)"; fi
 
-    if grep ': error: ' "$TMP/all.txt" | grep -v "^$BROKEN:" >"$TMP/stray.txt"; then
-        fail "Fehler ausserhalb von $BROKEN:"
-        sed 's/^/        /' "$TMP/stray.txt"
-    else
-        pass "alle Fehler liegen in $BROKEN"
-    fi
-
-    grep "^$BROKEN:[0-9]*:[0-9]*: error: " "$TMP/all.txt" |
-        sed -E 's/^[^:]+:([0-9]+):[0-9]+: error: .*\[([A-Za-z]+)\]$/\1 \2/' | sort -u >"$TMP/actual.txt"
-    if diff -u "$TMP/expected.txt" "$TMP/actual.txt" >"$TMP/diff.txt"; then
-        pass "(Zeile, Code) entspricht exakt den EXPECT-Markierungen ($(wc -l <"$TMP/expected.txt") Stellen)"
-    else
-        fail "(Zeile, Code) weicht von den EXPECT-Markierungen ab (- erwartet, + tatsaechlich):"
-        sed 's/^/        /' "$TMP/diff.txt"
-    fi
+    compare_errors "$TMP/all.txt" "$BROKEN"
 
     # 3. Textfragmente
     while IFS='|' read -r line fragment; do
@@ -134,6 +145,30 @@ assert data["summary"]["errors"] == len(errors)
 assert all(d["file"].endswith("Effects/Broken.luau") for d in errors)
 PY
         then pass "--json ist gueltig und konsistent"; else fail "--json ungueltig/inkonsistent"; fi
+    fi
+
+    # 6. --project
+    PCOMMON=(--defs "$DEFS" --project default.project.json --solver="$SOLVER" --quiet)
+    # shellcheck disable=SC2086
+    "$BIN" "${PCOMMON[@]}" $GOOD_FILES project/Consumer.luau >"$TMP/pgood.txt" 2>&1
+    rc=$?
+    if [ $rc -eq 0 ] && [ ! -s "$TMP/pgood.txt" ]; then
+        pass "--project: gute Dateien inkl. project/Consumer.luau fehlerfrei"
+    else
+        fail "--project: gute Dateien: Exit $rc, Ausgabe:"
+        sed 's/^/        /' "$TMP/pgood.txt"
+    fi
+    "$BIN" "${PCOMMON[@]}" >"$TMP/pall.txt" 2>&1
+    rc=$?
+    echo "  --- Ausgabe --project (nur project/) ---"
+    grep '^project/' "$TMP/pall.txt" | sed 's/^/    /'
+    echo "  ---"
+    if [ $rc -eq 1 ]; then pass "--project Gesamtlauf: Exit 1"; else fail "--project Gesamtlauf: Exit $rc (erwartet 1)"; fi
+    compare_errors "$TMP/pall.txt" "$BROKEN" "$MISNAMED"
+    if grep -F "$MISNAMED:3:" "$TMP/pall.txt" | grep -qF "'src' is not a child of Folder 'AstraFixture'"; then
+        pass "Verzeichnisname statt Instanzname wird erkannt"
+    else
+        fail "Misnamed.luau: erwartete Meldung fehlt"
     fi
 done
 

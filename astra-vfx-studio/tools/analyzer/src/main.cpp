@@ -103,8 +103,8 @@ static std::string singleLine(const std::string& message)
             size_t j = i + 1;
             while (j < message.size() && (message[j] == ' ' || message[j] == '\t'))
                 ++j;
-            if (j < message.size())
-                out += "; ";
+            if (j < message.size() && message[j] != '\n' && !out.empty())
+                out += ' ';
             i = j - 1;
         }
         else
@@ -238,7 +238,7 @@ struct RojoFileResolver : Luau::FileResolver
         if (it != node->children.end())
             return Luau::ModuleInfo{it->second->id};
 
-        return Luau::ModuleInfo{std::string(kMissingPrefix) + node->id + "\x01" + key};
+        return Luau::ModuleInfo{std::string(kMissingPrefix) + node->id + "\x02" + key};
     }
 
     std::optional<Luau::ModuleInfo> resolveModule(const Luau::ModuleInfo* context, Luau::AstExpr* expr, const Luau::TypeCheckLimits& limits) override
@@ -294,19 +294,32 @@ struct RojoFileResolver : Luau::FileResolver
         return std::nullopt;
     }
 
+    // Synthetische Knoten-IDs aus Projektdateien ("\x01node\x01Projekt.Tests") als Instanzpfad anzeigen
+    static std::string describeId(const std::string& id)
+    {
+        static const char kNodePrefix[] = "\x01node\x01";
+        if (id.rfind(kNodePrefix, 0) == 0)
+            return id.substr(sizeof(kNodePrefix) - 1);
+        return id;
+    }
+
     std::string getHumanReadableModuleName(const Luau::ModuleName& name) const override
     {
         if (isMissingId(name))
         {
             std::string rest = name.substr(sizeof(kMissingPrefix) - 1);
-            size_t sep = rest.find('\x01');
+            size_t sep = rest.find('\x02');
             std::string base = rest.substr(0, sep);
             std::string child = sep == std::string::npos ? "" : rest.substr(sep + 1);
             size_t dot = child.find('.');
             std::string first = child.substr(0, dot);
-            std::string baseDisplay = base;
+            std::string baseDisplay = describeId(base);
             if (const astra::RojoNode* baseNode = tree.findById(base))
-                baseDisplay = std::string(baseNode->className()) + " '" + baseNode->name + "' (" + base + ")";
+            {
+                baseDisplay = baseNode->className() + " '" + baseNode->name + "'";
+                if (describeId(base) != baseNode->name)
+                    baseDisplay += " (" + describeId(base) + ")";
+            }
             std::string msg = "'" + first + "' is not a child of " + baseDisplay + " in the Rojo tree";
             if (dot != std::string::npos)
                 msg += " (while resolving '" + child + "')";
@@ -315,15 +328,8 @@ struct RojoFileResolver : Luau::FileResolver
 
         if (const astra::RojoNode* node = tree.findById(name))
         {
-            switch (node->kind)
-            {
-            case astra::NodeKind::Folder:
-                return name + " (Folder, not a ModuleScript)";
-            case astra::NodeKind::Other:
-                return name + " (non-script instance, not a ModuleScript)";
-            default:
-                break;
-            }
+            if (node->kind == astra::NodeKind::Folder || node->kind == astra::NodeKind::Other)
+                return describeId(name) + " (" + node->className() + ", not a ModuleScript)";
         }
         return name;
     }
@@ -520,14 +526,16 @@ private:
 static void displayHelp(const char* argv0)
 {
     printf("%s\n\n", kVersion);
-    printf("Usage: %s --defs <globalTypes.d.luau> --root <rojoSrcDir> [options] [paths...]\n", argv0);
+    printf("Usage: %s --defs <globalTypes.d.luau> (--root <rojoSrcDir> | --project <default.project.json>) [options] [paths...]\n", argv0);
     printf("\n");
     printf("Type-checks Luau files of a Rojo project against Roblox API definitions (luau-lsp format).\n");
-    printf("paths: files or directories (default: all .luau/.lua files under --root)\n");
+    printf("paths: files or directories (default: all .luau/.lua scripts in the instance tree)\n");
     printf("\n");
     printf("Options:\n");
     printf("  --defs <file>          Roblox definitions file (required), may be given multiple times\n");
-    printf("  --root <dir>           Rojo source directory used to resolve require(script...) (required)\n");
+    printf("  --root <dir>           Rojo source directory; the directory itself is the root instance\n");
+    printf("  --project <file>       Rojo project file (subset: $path, $className, nested children);\n");
+    printf("                         $path is relative to the project file; replaces --root\n");
     printf("  --json                 machine readable JSON output on stdout\n");
     printf("  --strict               default mode strict for files without --!strict/--!nonstrict\n");
     printf("  --force-strict         check every file in strict mode (overrides --!nonstrict/--!nocheck)\n");
@@ -537,7 +545,7 @@ static void displayHelp(const char* argv0)
     printf("  --warnings-as-errors   exit code 1 also when only lint warnings are present\n");
     printf("  --script-typed         keep `script` typed as in the definitions (default: any)\n");
     printf("  --no-datamodel-services  do not add game.Players/game.ReplicatedStorage/... shortcuts\n");
-    printf("  --fflags=<list>        set Luau fast flags (Name=true,Name2=false)\n");
+    printf("  --fflags=<list>        set Luau fast flags (Name=true,Name2=false,IntFlag=123)\n");
     printf("  -j<N>                  number of worker threads (default: min(cores, 8))\n");
     printf("  --quiet                no summary line on stderr\n");
     printf("  --dump-tree            print the Rojo instance tree and exit\n");
@@ -636,7 +644,7 @@ static void setFlagList(const char* list)
 
 static void dumpTree(const astra::RojoNode* node, int depth)
 {
-    printf("%*s%s [%s] %s\n", depth * 2, "", node->name.c_str(), node->className(), node->id.c_str());
+    printf("%*s%s [%s] %s\n", depth * 2, "", node->name.c_str(), node->className().c_str(), RojoFileResolver::describeId(node->id).c_str());
     for (const auto& [_, child] : node->children)
         dumpTree(child, depth + 1);
 }
@@ -649,6 +657,7 @@ int main(int argc, char** argv)
 
     std::vector<std::string> defsFiles;
     std::string rootDir;
+    std::string projectFile;
     std::vector<std::string> inputPaths;
     bool json = false;
     bool runLint = true;
@@ -703,6 +712,8 @@ int main(int argc, char** argv)
             defsFiles.push_back(takeValue(i, "--defs"));
         else if (isOpt(i, "--root"))
             rootDir = takeValue(i, "--root");
+        else if (isOpt(i, "--project"))
+            projectFile = takeValue(i, "--project");
         else if (strcmp(a, "--json") == 0)
             json = true;
         else if (strcmp(a, "--strict") == 0 || strcmp(a, "--mode=strict") == 0)
@@ -741,16 +752,25 @@ int main(int argc, char** argv)
         }
     }
 
-    if (rootDir.empty())
+    if (rootDir.empty() && projectFile.empty())
     {
-        fprintf(stderr, "error: --root <dir> is required (see --help)\n");
+        fprintf(stderr, "error: --root <dir> or --project <default.project.json> is required (see --help)\n");
         return 2;
     }
 
     astra::RojoTree tree;
     {
         std::string error;
-        if (!tree.build(rootDir, error))
+        bool ok;
+        if (!projectFile.empty())
+        {
+            if (!rootDir.empty())
+                fprintf(stderr, "astra-analyze: warning: --project given, ignoring --root %s\n", rootDir.c_str());
+            ok = tree.buildFromProject(projectFile, error);
+        }
+        else
+            ok = tree.build(rootDir, error);
+        if (!ok)
         {
             fprintf(stderr, "error: %s\n", error.c_str());
             return 2;
@@ -930,15 +950,15 @@ int main(int argc, char** argv)
                 else
                 {
                     d.code = typeErrorName(error);
-                    d.message = singleLine(Luau::toString(error, Luau::TypeErrorToStringOptions{frontend.fileResolver})) + astra::suggestionForError(error);
+                    d.message = Luau::toString(error, Luau::TypeErrorToStringOptions{frontend.fileResolver}) + astra::suggestionForError(error);
                 }
                 diagnostics.push_back(std::move(d));
             }
 
             for (const Luau::LintWarning& w : cr->lintResult.errors)
-                diagnostics.push_back({humanName, w.location, "error", Luau::LintWarning::getName(w.code), singleLine(w.text)});
+                diagnostics.push_back({humanName, w.location, "error", Luau::LintWarning::getName(w.code), w.text});
             for (const Luau::LintWarning& w : cr->lintResult.warnings)
-                diagnostics.push_back({humanName, w.location, "warning", Luau::LintWarning::getName(w.code), singleLine(w.text)});
+                diagnostics.push_back({humanName, w.location, "warning", Luau::LintWarning::getName(w.code), w.text});
         }
     }
 
@@ -1004,7 +1024,7 @@ int main(int argc, char** argv)
                 d.location.begin.line + 1,
                 d.location.begin.column + 1,
                 d.severity.c_str(),
-                d.message.c_str(),
+                singleLine(d.message).c_str(),
                 d.code.c_str()
             );
     }
