@@ -171,7 +171,13 @@ Scheduler: genau EINE RunService-Verbindung für alle aktiven Player, wird bei L
    bzw. an den Pool zurückgeben.
 
 `Player:seek(t)` wertet denselben Zustand ohne Emission aus (Scrubbing). Partikel werden dabei geleert, weil die
-Engine keine Partikelsimulation „vorspulen“ kann (dokumentierte Einschränkung).
+Engine keine Partikelsimulation „vorspulen“ kann: `ParticleEmitter.FastForward` ist RobloxScriptSecurity,
+`TimeScale` reicht nur von 0 bis 1, es gibt keinen Seed (verifiziert, siehe Constraints).
+
+Weitere Engine-Fakten, die der Player berücksichtigt: Aktionen werden nie im selben Frame ausgeführt, in dem die
+Instanzen gebaut wurden (ein `Emit` direkt nach dem Parenten kann wirkungslos sein – berichtet); `Color`/`Size`/
+`Transparency` eines Emitters wirken auf alle lebenden Partikel, `Rate`/`Speed`/`Lifetime` nur auf neue; Beams und
+Trails haben keinen Zeitfaktor (Slow-Motion skaliert `TextureSpeed`, Trails altern in Echtzeit).
 
 ### 5.3 Öffentliche API (`require(ReplicatedStorage.AstraVFX)`)
 
@@ -272,6 +278,10 @@ Plugin/
 
 ### 7.3 Vorschau
 
+* Das Plugin initialisiert den Editor nur im Edit-DataModel (`RunService:IsEdit()`); Plugins laufen während
+  Playtests auch in den Play-DataModels.
+* Die Vorschau-Uhr läuft über `RunService.Heartbeat`. Dass Heartbeat im reinen Edit-Modus für Plugins feuert, ist
+  nicht offiziell dokumentiert (Annahme, breite Praxis) und steht als erster Punkt in der manuellen Studio-Testliste.
 * **Primär: Workspace-Vorschau.** Effekt wird mit dem Runtime-Builder (Preview-Modus) in einen eigenen Ordner
   `Workspace.AstraVFX_Preview` gebaut (`Archivable = false` ⇒ wird nicht mit dem Place gespeichert; alle
   Instanzen tragen das Attribut `AstraPreview`). Positionen: vor der Kamera, Ursprung, Auswahl oder isolierte
