@@ -1108,12 +1108,14 @@ return function(T: any, use: (string) -> any, ctx: any)
 				end
 			)
 
-			T.it("rate channel values are × quality.countScale and clamped to the 400/s engine cap", function()
+			-- The channel shares the compiled domain of its baseProperty `rate` (already × countScale), so values are
+			-- written as given (see ComponentsReview.spec: applying the rest value must not change the built Rate).
+			T.it("rate channel values are written as given and clamped to the 400/s engine cap", function()
 				local h = harness()
 				local c = h:build("particles", nil, { quality = LOW })
 				local e = c.instances[1]
 				c:apply("rate", 100)
-				T.expect(e.Rate).toBe(50)
+				T.expect(e.Rate).toBe(100)
 				c:apply("rate", 5000)
 				T.expect(e.Rate).toBe(Constants.MAX_PARTICLE_RATE)
 				c:apply("rate", -5)
@@ -1132,7 +1134,11 @@ return function(T: any, use: (string) -> any, ctx: any)
 				c:setActive(false, frame(h))
 				c:setActive(true, frame(h, true))
 				T.expect(emitCalls(e)).toEqual({ 40 })
-				T.expect(e.Enabled).toBe(true) -- the state is still evaluated while seeking
+				-- Seek = no emission at all: continuous emission stays off until the next playback frame.
+				T.expect(e.Enabled).toBe(false)
+				c:setTransform(CFrame.new(), CFrame.new(), frame(h))
+				T.expect(e.Enabled).toBe(true)
+				T.expect(emitCalls(e)).toEqual({ 40 })
 			end)
 
 			T.itIf(isLune, "burst 0 never calls Emit", function()

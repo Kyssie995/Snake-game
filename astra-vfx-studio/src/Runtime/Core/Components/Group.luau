@@ -38,8 +38,10 @@ local descriptor: Types.ComponentDescriptor = {
 			table.insert(instances, a)
 		end
 		local controller = Common.controller(component, instances)
+		local lastCFrame: CFrame? = nil
 		function controller.setTransform(_self, localCFrame: CFrame, _worldCFrame: CFrame, _frame: Types.FrameContext)
-			if marker then
+			if marker and localCFrame ~= lastCFrame then
+				lastCFrame = localCFrame
 				marker.CFrame = localCFrame
 			end
 		end

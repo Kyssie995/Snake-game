@@ -14,6 +14,10 @@
 	    segments; existing segments fade out over `lifetime` (tailTime = lifetime).
 	  * clearOnStart: Clear() when the component becomes active, and once more after the first transform of the
 	    activation so the jump from the previous position never leaves a streak.
+	  * Seeking: every transform with frame.seeking clears the drawn segments after moving the attachments. Trail
+	    segments cannot be reconstructed for a scrubbed time (like particles, which the Player clears on seek), and
+	    without the clear every scrub jump would leave a streak between the scrubbed positions. Playback frames
+	    never clear, so drawing continues from the scrubbed position.
 	  * Channels: transform (scale = width multiplier), width, transparency (fade), tint, brightness.
 ]]
 
@@ -305,13 +309,14 @@ local descriptor: Types.ComponentDescriptor = {
 			end
 		end
 
-		function controller.setTransform(_self, newLocalCFrame: CFrame, _worldCFrame: CFrame, _frame: FrameContext)
+		function controller.setTransform(_self, newLocalCFrame: CFrame, _worldCFrame: CFrame, frame: FrameContext)
 			if newLocalCFrame ~= localCFrame then
 				localCFrame = newLocalCFrame
 				refreshAttachments()
 			end
-			if clearPending then
-				-- The attachments now sit at the activation position: drop anything drawn from the old one.
+			-- Seeking: the state at a scrubbed time has no drawn segments (see header). clearPending: the attachments
+			-- now sit at the activation position, so drop anything drawn from the old one.
+			if frame.seeking or clearPending then
 				clearPending = false
 				trail:Clear()
 			end

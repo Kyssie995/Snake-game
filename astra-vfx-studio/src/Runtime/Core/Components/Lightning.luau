@@ -10,11 +10,15 @@
 	(u ∈ [0.15, 0.85)), heading 20°..45° away from the bolt direction (random side) with length branchLength × main
 	length; each is a zig-zag of m = max(2, round((n − 1)·branchLength) + 1) points with half the jitter, drawn
 	0.6 × as thick as the main bolt.
-	Shape seed = Random.hash(component.seed, regenerateCount, floor(localTime·flickerRate + 1e-9)) → a new
+	Shape seed = Random.hash(component.seed, regenerations, floor(localTime·flickerRate + 1e-9)) → a new
 	deterministic shape every 1/flickerRate seconds (flickerRate 0 = static; the 1e-9 guards bucket edges against
-	float noise). The `regenerate` event increments regenerateCount (reset() restores 0). The shape is recomputed
-	only when the seed bucket or `from`/`to` change, so update() is a pure function of (localTime, seed,
-	regenerateCount, props, channel values).
+	float noise). regenerations = (authored `regenerate` events of this component with time ≤ localTime)
+	+ (other regenerate actions executed since build/reset, e.g. runtime graph triggers). Authored events are
+	read from component.events at build time and counted from localTime, so their onAction (matched by
+	action.sourceId) adds nothing: replaying or skipping them while scrubbing cannot change the shape at a local
+	time. reset() forgets the runtime count. The shape is recomputed only when the seed bucket, the regeneration
+	count or `from`/`to` change, so update() is a pure function of (localTime, seed, authored events, runtime
+	regenerations, props, channel values).
 
 	render = "beam": one Attachment per polyline point on ctx.root (Attachment.CFrame = localCFrame × point) and one
 	Beam per sub-segment between consecutive attachments, parented to the Root part: FaceCamera = true,
@@ -422,7 +426,17 @@ local descriptor: Types.ComponentDescriptor = {
 		local active = false
 		local released = false
 		local localTime = 0
-		local regenerateCount = 0
+		-- Regenerations: authored events (pure function of localTime) + runtime actions (counted).
+		local runtimeRegenerations = 0
+		local authoredTimes: { number } = {}
+		local authoredIds: { [string]: boolean } = {}
+		for _, event in component.events do
+			if event.action == "regenerate" then
+				table.insert(authoredTimes, event.time)
+				authoredIds[event.id] = true
+			end
+		end
+		table.sort(authoredTimes)
 		local from: Vector3 = props.from
 		local to: Vector3 = props.to
 		local thickness: number = props.thickness
@@ -457,22 +471,35 @@ local descriptor: Types.ComponentDescriptor = {
 			return math.floor(time * flickerRate + BUCKET_EPSILON)
 		end
 
+		-- Authored regenerate events due at `time` (relative times; the epsilon absorbs start-time float noise).
+		local function regenerationsAt(time: number): number
+			local n = runtimeRegenerations
+			for _, t in authoredTimes do
+				if t > time + BUCKET_EPSILON then
+					break
+				end
+				n += 1
+			end
+			return n
+		end
+
 		-- Recomputes the polylines when needed; returns true when the shape changed.
 		local function ensureShape(): boolean
 			local bucket = bucketAt(localTime)
+			local regenerations = regenerationsAt(localTime)
 			if
 				bucket == shapeBucket
-				and regenerateCount == shapeRegenerations
+				and regenerations == shapeRegenerations
 				and from == shapeFrom
 				and to == shapeTo
 			then
 				return false
 			end
 			shapeBucket = bucket
-			shapeRegenerations = regenerateCount
+			shapeRegenerations = regenerations
 			shapeFrom = from
 			shapeTo = to
-			local seed = Random.hash(component.seed, regenerateCount, bucket)
+			local seed = Random.hash(component.seed, regenerations, bucket)
 			generate(layout, seed, from, to, jitter, branchLength, polylines)
 			shapeVersion += 1
 			return true
@@ -587,7 +614,7 @@ local descriptor: Types.ComponentDescriptor = {
 			active = false
 			released = false
 			localTime = 0
-			regenerateCount = 0
+			runtimeRegenerations = 0
 			from = props.from
 			to = props.to
 			thickness = props.thickness
@@ -677,7 +704,11 @@ local descriptor: Types.ComponentDescriptor = {
 			if not alive or action.action ~= "regenerate" then
 				return
 			end
-			regenerateCount += 1
+			local sourceId = action.sourceId
+			local authored = action.source == "event" and sourceId ~= nil and authoredIds[sourceId] == true
+			if not authored then
+				runtimeRegenerations += 1
+			end
 			ensureShape()
 			refresh()
 			place(frame)

@@ -13,7 +13,8 @@
 		local pts = Draw.bezier(p0, c0, c1, p1, 24)                           -- sample a cubic bezier (25 points)
 
 	Coordinates are pixel offsets in the parent's local space (top-left origin, y down); `Draw.toPixel` /
-	`Draw.fromPixel` map normalised [0, 1]² values (optionally with y up) to that space and back.
+	`Draw.fromPixel` map normalised [0, 1]² values (optionally with y up) to that space and back. UDim offsets are
+	whole pixels in the engine: positions are rounded to the nearest pixel, lengths rounded up.
 
 	A line is one Frame (AnchorPoint 0.5/0.5) placed at the segment midpoint, sized (length, thickness) and turned
 	with `Rotation`. Polyline segments are lengthened by `thickness` (square caps) so joints show no gaps.
@@ -66,7 +67,11 @@ local function finite(v: Vector2): boolean
 	return v.X == v.X and v.Y == v.Y and math.abs(v.X) ~= math.huge and math.abs(v.Y) ~= math.huge
 end
 
--- Geometry of a segment frame: position (midpoint), size and rotation in degrees.
+--[[
+	Geometry of a segment frame: position (midpoint), size and rotation in degrees. UDim offsets are whole pixels
+	in the engine, so the midpoint is rounded to the nearest pixel and the length rounded up (a segment never
+	comes out shorter than the distance it has to cover, so polylines show no gaps).
+]]
 function Draw.segment(p0: Vector2, p1: Vector2, thickness: number, caps: boolean?): (UDim2, UDim2, number)
 	if not finite(p0) or not finite(p1) then
 		return UDim2.fromOffset(0, 0), UDim2.fromOffset(0, 0), 0
@@ -75,8 +80,10 @@ function Draw.segment(p0: Vector2, p1: Vector2, thickness: number, caps: boolean
 	local length = d.Magnitude
 	local mid = (p0 + p1) / 2
 	local rotation = if length > 0 then math.deg(math.atan2(d.Y, d.X)) else 0
-	local width = length + (if caps then thickness else 0)
-	return UDim2.fromOffset(mid.X, mid.Y), UDim2.fromOffset(width, thickness), rotation
+	local width = math.ceil(length + (if caps then thickness else 0) - 1e-9)
+	return UDim2.fromOffset(math.round(mid.X), math.round(mid.Y)),
+		UDim2.fromOffset(math.max(0, width), math.max(1, math.round(thickness))),
+		rotation
 end
 
 -- Repositions an existing line frame. Returns the frame.
@@ -151,8 +158,11 @@ function Draw.setPolyline(container: Frame, points: { Vector2 }, thickness: numb
 	local existing = segments(container)
 	local needed = math.max(0, #points - 1)
 	for i = 1, needed do
-		local seg = existing[i]
-		if seg == nil then
+		local found: Frame? = existing[i]
+		local seg: Frame
+		if found then
+			seg = found
+		else
 			seg = Instance.new("Frame")
 			seg.Name = "Segment"
 			seg.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -176,13 +186,7 @@ end
 
 -- Connected line through `points`. Returns a transparent full-size container Frame named "Polyline" whose
 -- children "Segment" are the line frames (so the points share the parent's coordinate space).
-function Draw.polyline(
-	parent: Instance?,
-	points: { Vector2 },
-	thickness: number?,
-	color: Color3?,
-	style: Style?
-): Frame
+function Draw.polyline(parent: Instance?, points: { Vector2 }, thickness: number?, color: Color3?, style: Style?): Frame
 	local s: Style = style or {}
 	local container = Instance.new("Frame")
 	container.Name = s.name or "Polyline"
@@ -208,9 +212,9 @@ end
 
 -- Moves (and optionally resizes) a dot.
 function Draw.setDot(dot: Frame, center: Vector2, radius: number?): Frame
-	local r = radius or dot.Size.X.Offset / 2
-	dot.Position = UDim2.fromOffset(center.X, center.Y)
-	dot.Size = UDim2.fromOffset(r * 2, r * 2)
+	local d = math.max(1, math.round((radius or dot.Size.X.Offset / 2) * 2))
+	dot.Position = UDim2.fromOffset(math.round(center.X), math.round(center.Y))
+	dot.Size = UDim2.fromOffset(d, d)
 	return dot
 end
 
@@ -257,8 +261,9 @@ end
 function Draw.setRect(rect: Frame, p0: Vector2, p1: Vector2): Frame
 	local x0, x1 = math.min(p0.X, p1.X), math.max(p0.X, p1.X)
 	local y0, y1 = math.min(p0.Y, p1.Y), math.max(p0.Y, p1.Y)
-	rect.Position = UDim2.fromOffset(x0, y0)
-	rect.Size = UDim2.fromOffset(x1 - x0, y1 - y0)
+	local left, top = math.round(x0), math.round(y0)
+	rect.Position = UDim2.fromOffset(left, top)
+	rect.Size = UDim2.fromOffset(math.round(x1) - left, math.round(y1) - top)
 	return rect
 end
 

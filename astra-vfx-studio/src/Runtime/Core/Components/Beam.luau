@@ -20,6 +20,11 @@
 	Channels: transform (scale = width multiplier), transparency (fade) / tint (sequence rebuild only on change),
 	width0/1, curveSize0/1, from/to (move the attachments), brightness, textureSpeed. Beams have no time factor,
 	so TextureSpeed is multiplied by the effect time scale (slow motion slows the texture scroll).
+
+	Segments = max(segments, gradient keypoints − 1), at most 1000: a Color/Transparency sequence with n keypoints
+	needs at least n − 1 segments (engine fact, research §2.6). Validation can only check the authored value; the
+	Compiler's segment quality scaling (segmentScale 0.5 on Low) can push it below the gradient's needs, so the
+	floor is enforced here. Fade/tint rebuild the sequences with the same keypoint count, so the floor is fixed.
 ]]
 
 local Common = require(script.Parent.Common)
@@ -60,6 +65,14 @@ local function attachmentFrames(
 		rotation1 = r * rotation1
 	end
 	return localCFrame * (CFrame.new(from) * rotation0), localCFrame * (CFrame.new(to) * rotation1)
+end
+
+local MAX_SEGMENTS = 1000
+
+-- Beam.Segments for the authored (quality-scaled) segment count: never below (gradient keypoints − 1).
+local function segmentCount(segments: number, color: ColorSequence, transparency: NumberSequence): number
+	local gradient = math.max(#color.Keypoints, #transparency.Keypoints) - 1
+	return math.clamp(math.max(math.floor(segments + 0.5), gradient), 1, MAX_SEGMENTS)
 end
 
 local function countTracksExcept(component: CompiledComponent, excluded: { [string]: boolean }): number
@@ -295,7 +308,7 @@ local descriptor: Types.ComponentDescriptor = {
 		beam.Width1 = baseWidth1 * component.scale
 		beam.CurveSize0 = baseCurve0
 		beam.CurveSize1 = baseCurve1
-		beam.Segments = math.max(1, math.floor(props.segments + 0.5))
+		beam.Segments = segmentCount(props.segments, baseColor, baseTransparency)
 		beam.TextureLength = props.textureLength
 		beam.TextureMode = props.textureMode
 		beam.TextureSpeed = baseTextureSpeed * effectTimeScale

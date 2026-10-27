@@ -11,17 +11,25 @@
 	                    volume shape gets a BasePart parent. The host part moves through frame.moveParts.
 
 	Behaviour:
-	  * Continuous emission: Enabled = active and rate > 0 (and not disabled by an event, not released).
+	  * Continuous emission: Enabled = active and rate > 0 (and not disabled by an event, not released, not
+	    seeking). The seek state is taken from every frame the controller sees (setActive, setTransform, update,
+	    onAction), so a seek switches continuous emission off and the next playback frame switches it back on.
 	  * `burst` particles are emitted once when the component becomes active; `emit` events call Emit(count).
-	    Nothing is emitted while frame.seeking (scrubbing must stay deterministic) or after release().
+	    Nothing is emitted while frame.seeking (scrubbing must stay deterministic: the Player clears particles on
+	    seek and the engine cannot fast-forward them) or after release().
 	  * Size = authored size × scale × quality.sizeCompensation (scale = transform.scale, overridden by the
 	    `scale` channel).
-	  * Channels `transparency` (fade, Common.fadeSequence) and `tint` (Common.tintSequence) rebuild the sequences
-	    only when the channel value changed; every channel caches its last applied value.
+	  * Channels `transparency` (fade) and `tint` (Common.tintSequence) rebuild the sequences only when the channel
+	    value changed; every channel caches its last applied value. The fade maps each keypoint's whole random range
+	    [v − e, v + e] through t' = 1 − (1 − t)(1 − fade), i.e. value' = 1 − (1 − v)(1 − fade) and
+	    envelope' = e·(1 − fade) (local fadeSequence; Common.fadeSequence keeps the envelope, so a fade of 1 would
+	    still show particles whose random offset is negative).
 	  * TimeScale = clamp(timeScale, 0, 1) × min(1, effect timeScale) — the engine range is 0..1, so slow motion
 	    works but fast motion cannot speed particles up.
-	  * The `rate` channel carries authored rates; the Compiler already quality-scaled the `rate` property, so
-	    channel values are multiplied by quality.countScale here (then clamped to the 400/s engine cap).
+	  * The `rate` channel works in the same (compiled) domain as its baseProperty `rate`: values are written as
+	    given, clamped to the 400/s engine cap. Applying the rest value props.rate (already × countScale) therefore
+	    leaves the built Rate unchanged. Quality scaling of animated rates belongs to the Compiler, like every
+	    other quality rule.
 	  * release() sets Enabled = false: live particles finish their lifetime (tailTime = lifetime.Max).
 ]]
 
@@ -52,6 +60,21 @@ local function volumeShape(name: any): Enum.ParticleEmitterShape?
 	end
 	local shape: Enum.ParticleEmitterShape? = SHAPES[name]
 	return shape
+end
+
+-- Fade over an authored transparency sequence: t' = 1 − (1 − t)(1 − fade) applied to the whole random range of
+-- every keypoint, so the envelope shrinks with (1 − fade) and fade = 1 hides every particle. Keypoint count is kept.
+local function fadeSequence(base: NumberSequence, fade: number): NumberSequence
+	if fade <= 0 then
+		return base
+	end
+	local f = math.clamp(fade, 0, 1)
+	local keep = 1 - f
+	local keys = {}
+	for i, k in base.Keypoints do
+		keys[i] = NumberSequenceKeypoint.new(k.Time, math.clamp(1 - (1 - k.Value) * keep, 0, 1), k.Envelope * keep)
+	end
+	return NumberSequence.new(keys)
 end
 
 local function maxSequenceValue(sequence: NumberSequence): number
@@ -324,7 +347,7 @@ local descriptor: Types.ComponentDescriptor = {
 		channel(
 			"rate",
 			"number",
-			"Particles per second (× quality count scale). 0 stops continuous emission.",
+			"Particles per second (same domain as the rate property). 0 stops continuous emission.",
 			{ min = 0, max = 400, baseProperty = "rate" }
 		),
 		channel("brightness", "number", "Brightness multiplier.", { min = 0, max = 100, baseProperty = "brightness" }),
@@ -432,6 +455,7 @@ local descriptor: Types.ComponentDescriptor = {
 		local enabledByEvent = true
 		local released = false
 		local enabled = false
+		local seeking = false
 		local rate = baseRate
 		local scale = component.scale
 		local fade = 0
@@ -443,10 +467,19 @@ local descriptor: Types.ComponentDescriptor = {
 		local lastCFrame: CFrame? = nil
 
 		local function refreshEnabled()
-			local on = active and enabledByEvent and not released and rate > 0
+			local on = active and enabledByEvent and not released and not seeking and rate > 0
 			if on ~= enabled then
 				enabled = on
 				emitter.Enabled = on
+			end
+		end
+
+		-- Tracks frame.seeking: continuous emission is off during seek frames, back on with the next playback frame.
+		local function observe(frame: FrameContext?)
+			local isSeeking = frame ~= nil and frame.seeking == true
+			if isSeeking ~= seeking then
+				seeking = isSeeking
+				refreshEnabled()
 			end
 		end
 
@@ -471,9 +504,11 @@ local descriptor: Types.ComponentDescriptor = {
 
 		function controller.setActive(_self, isActive: boolean, frame: FrameContext)
 			if isActive == active then
+				observe(frame)
 				return
 			end
 			active = isActive
+			seeking = frame ~= nil and frame.seeking == true
 			refreshEnabled()
 			if isActive and burst > 0 then
 				emit(burst, frame)
@@ -486,7 +521,7 @@ local descriptor: Types.ComponentDescriptor = {
 					local v = math.clamp(value, 0, 1)
 					if v ~= fade then
 						fade = v
-						emitter.Transparency = Common.fadeSequence(baseTransparency, v)
+						emitter.Transparency = fadeSequence(baseTransparency, v)
 					end
 				end
 			elseif name == "tint" then
@@ -496,7 +531,7 @@ local descriptor: Types.ComponentDescriptor = {
 				end
 			elseif name == "rate" then
 				if type(value) == "number" then
-					local r = math.clamp(value * countScale, 0, Constants.MAX_PARTICLE_RATE)
+					local r = math.clamp(value, 0, Constants.MAX_PARTICLE_RATE)
 					if r ~= rate then
 						rate = r
 						emitter.Rate = r
@@ -544,6 +579,7 @@ local descriptor: Types.ComponentDescriptor = {
 		end
 
 		function controller.setTransform(_self, localCFrame: CFrame, worldCFrame: CFrame, frame: FrameContext)
+			observe(frame)
 			if attachment then
 				if localCFrame ~= lastCFrame then
 					lastCFrame = localCFrame
@@ -558,7 +594,13 @@ local descriptor: Types.ComponentDescriptor = {
 			end
 		end
 
+		-- No procedural motion: update only follows the seek state (the Player calls it every active frame).
+		controller.update = function(_self, _localTime: number, frame: FrameContext)
+			observe(frame)
+		end
+
 		function controller.onAction(_self, action: Types.ScheduledAction, frame: FrameContext)
+			observe(frame)
 			local kind = action.action
 			if kind == "emit" then
 				emit(action.count or defaultEmit, frame)
@@ -583,6 +625,7 @@ local descriptor: Types.ComponentDescriptor = {
 			enabledByEvent = true
 			released = false
 			enabled = false
+			seeking = false
 			emitter.Enabled = false
 			emitter:Clear()
 			rate = baseRate
