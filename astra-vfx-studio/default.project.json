@@ -1,0 +1,27 @@
+{
+	"name": "AstraVFXStudio",
+	"tree": {
+		"$className": "Folder",
+		"Plugin": {
+			"$path": "src/Plugin"
+		},
+		"AstraVFX": {
+			"$path": "src/Runtime"
+		},
+		"Authoring": {
+			"$path": "src/Authoring"
+		},
+		"Presets": {
+			"$path": "src/Presets"
+		},
+		"Tests": {
+			"$className": "Folder",
+			"Framework": {
+				"$path": "tests/framework/TestFramework.luau"
+			},
+			"Specs": {
+				"$path": "tests/specs"
+			}
+		}
+	}
+}

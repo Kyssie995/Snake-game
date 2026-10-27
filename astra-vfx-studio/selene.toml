@@ -1,0 +1,8 @@
+# Linting. Roblox type checking is done by tools/analyzer (astra-analyze); selene covers style/lint rules.
+# The official `roblox` std needs a network download, so a small custom std (astra.yml) declares Roblox globals.
+std = "astra"
+
+[lints]
+shadowing = "allow"
+unused_variable = "warn"
+global_usage = "deny"
