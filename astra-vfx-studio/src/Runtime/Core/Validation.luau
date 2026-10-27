@@ -594,9 +594,15 @@ end
 -- State
 -- ─────────────────────────────────────────────────────────────────────────────
 
+type KeyInfo = {
+	time: number?, -- nil when invalid
+	value: any, -- canonical value; nil when invalid
+	path: string, -- path of the keyframe's time
+}
+
 type TrackInfo = {
 	channel: string,
-	keys: { { time: number?, value: any } }, -- valid keyframes (time nil when invalid); value nil when invalid
+	keys: { KeyInfo }, -- object keyframes in definition order
 }
 
 type Info = {
@@ -611,10 +617,13 @@ type Info = {
 	values: { [string]: any }, -- canonical values of valid properties
 	invalid: { [string]: boolean }, -- properties with invalid values
 	tracks: { [string]: { TrackInfo } }, -- enabled tracks with a known channel, by channel
+	trackList: { TrackInfo }, -- the same tracks in definition order
+	eventTimes: { { time: number, path: string } }, -- events with a valid time (lint.outside_duration)
 	emitEvents: number,
 	overrideEmits: boolean, -- a qualityOverrides entry sets rate or burst above 0
 	spanLength: number?, -- clamped span length, nil when unknown
 	timingValid: boolean,
+	built: boolean, -- enabled and no disabled ancestor (set by validateHierarchy); lints run on built components
 }
 
 type GraphScan = {
@@ -1194,13 +1203,11 @@ end
 
 local function validateKeyframes(
 	ctx: Ctx,
-	info: Info,
 	track: { [string]: any },
 	trackPath: string,
 	channel: ChannelSpec?,
 	trackInfo: TrackInfo?,
-	componentId: string?,
-	lint: boolean
+	componentId: string?
 )
 	local keyframes = track.keyframes
 	local path = field(trackPath, "keyframes")
@@ -1230,9 +1237,6 @@ local function validateKeyframes(
 	end
 	local previous = -INF
 	local orderReported = false
-	local outside = 0
-	local firstOutside: string? = nil
-	local spanLength = info.spanLength
 	for i = 1, n do
 		local key = keyframes[i]
 		local p = item(path, i)
@@ -1277,10 +1281,6 @@ local function validateKeyframes(
 			if t > previous then
 				previous = t
 			end
-			if lint and spanLength and spanLength > 0 and t > spanLength + EPSILON then
-				outside += 1
-				firstOutside = firstOutside or field(p, "time")
-			end
 		end
 		local value = key.value
 		local valueOk = false
@@ -1314,32 +1314,13 @@ local function validateKeyframes(
 			table.insert(trackInfo.keys, {
 				time = if timeOk then t else nil,
 				value = if valueOk then normalize(channel.kind, value, channel) else nil,
+				path = field(p, "time"),
 			})
 		end
 	end
-	if outside > 0 and firstOutside and spanLength then
-		add(
-			ctx,
-			"warning",
-			"lint.outside_duration",
-			firstOutside,
-			outside
-				.. " keyframe(s) of this track lie after the component ends ("
-				.. num(spanLength)
-				.. " s after its start); they are never reached",
-			"extend the component duration or move the keyframes",
-			componentId
-		)
-	end
 end
 
-local function validateTracks(
-	ctx: Ctx,
-	info: Info,
-	descriptor: ComponentDescriptor?,
-	componentId: string?,
-	lint: boolean
-)
+local function validateTracks(ctx: Ctx, info: Info, descriptor: ComponentDescriptor?, componentId: string?)
 	local tracks = info.raw.tracks
 	if tracks == nil then
 		return
@@ -1475,19 +1456,14 @@ local function validateTracks(
 				info.tracks[channel.name] = list
 			end
 			table.insert(list, ti)
+			table.insert(info.trackList, ti)
 			trackInfo = ti
 		end
-		validateKeyframes(ctx, info, track, p, channel, trackInfo, componentId, lint)
+		validateKeyframes(ctx, track, p, channel, trackInfo, componentId)
 	end
 end
 
-local function validateEvents(
-	ctx: Ctx,
-	info: Info,
-	descriptor: ComponentDescriptor?,
-	componentId: string?,
-	lint: boolean
-)
+local function validateEvents(ctx: Ctx, info: Info, descriptor: ComponentDescriptor?, componentId: string?)
 	local events = info.raw.events
 	if events == nil then
 		return
@@ -1518,7 +1494,6 @@ local function validateEvents(
 		)
 	end
 	local ids: { [string]: number } = {}
-	local spanLength = info.spanLength
 	for i = 1, n do
 		local event = events[i]
 		local p = item(path, i)
@@ -1562,20 +1537,8 @@ local function validateEvents(
 				nil,
 				componentId
 			)
-		elseif lint and spanLength and spanLength > 0 and t >= spanLength - EPSILON then
-			add(
-				ctx,
-				"warning",
-				"lint.outside_duration",
-				field(p, "time"),
-				"event at "
-					.. num(t)
-					.. " s is not inside the component span (0 to "
-					.. num(spanLength)
-					.. " s); it is dropped",
-				"events must happen before the component ends",
-				componentId
-			)
+		else
+			table.insert(info.eventTimes, { time = t, path = field(p, "time") })
 		end
 		if descriptor == nil then
 			continue
@@ -1933,7 +1896,6 @@ local function validateComponent(ctx: Ctx, info: Info, firstIndexOfId: { [string
 	end
 	validateTransform(ctx, info, componentId)
 
-	local lint = info.enabled and descriptor ~= nil
 	if descriptor then
 		validateProperties(ctx, info, descriptor, componentId)
 	elseif raw.properties ~= nil and not isObject(raw.properties) then
@@ -1947,8 +1909,8 @@ local function validateComponent(ctx: Ctx, info: Info, firstIndexOfId: { [string
 			componentId
 		)
 	end
-	validateTracks(ctx, info, descriptor, componentId, lint)
-	validateEvents(ctx, info, descriptor, componentId, lint)
+	validateTracks(ctx, info, descriptor, componentId)
+	validateEvents(ctx, info, descriptor, componentId)
 	if descriptor then
 		validateOverrides(ctx, info, descriptor, componentId)
 	elseif raw.qualityOverrides ~= nil and not isObject(raw.qualityOverrides) then
@@ -2014,10 +1976,13 @@ local function validateComponents(ctx: Ctx)
 				values = {},
 				invalid = {},
 				tracks = {},
+				trackList = {},
+				eventTimes = {},
 				emitEvents = 0,
 				overrideEmits = false,
 				spanLength = nil,
 				timingValid = false,
+				built = raw.enabled ~= false,
 			}
 			infos[i] = info
 			table.insert(ctx.list, info)
@@ -2162,6 +2127,7 @@ local function validateHierarchy(ctx: Ctx)
 		while current and not seen[current] do
 			seen[current] = true
 			if not current.enabled then
+				info.built = false
 				add(
 					ctx,
 					"info",
@@ -2552,9 +2518,61 @@ local function lintComponent(ctx: Ctx, info: Info)
 	end
 end
 
+-- lint.outside_duration: keyframes after the span end (one diagnostic per track) and events at/after it.
+local function lintTiming(ctx: Ctx, info: Info)
+	local spanLength = info.spanLength
+	if spanLength == nil or spanLength <= 0 then
+		return
+	end
+	for _, track in info.trackList do
+		local outside = 0
+		local first: string? = nil
+		for _, key in track.keys do
+			if key.time and (key.time :: number) > spanLength + EPSILON then
+				outside += 1
+				first = first or key.path
+			end
+		end
+		if outside > 0 and first then
+			add(
+				ctx,
+				"warning",
+				"lint.outside_duration",
+				first,
+				outside
+					.. " keyframe(s) of the "
+					.. track.channel
+					.. " track lie after the component ends ("
+					.. num(spanLength)
+					.. " s after its start); they are never reached",
+				"extend the component duration or move the keyframes",
+				info.id
+			)
+		end
+	end
+	for _, event in info.eventTimes do
+		if event.time >= spanLength - EPSILON then
+			add(
+				ctx,
+				"warning",
+				"lint.outside_duration",
+				event.path,
+				"event at "
+					.. num(event.time)
+					.. " s is not inside the component span (0 to "
+					.. num(spanLength)
+					.. " s); it is dropped",
+				"events must happen before the component ends",
+				info.id
+			)
+		end
+	end
+end
+
 local function lint(ctx: Ctx)
 	for _, info in ctx.list do
-		if info.enabled and info.descriptor then
+		if info.built and info.descriptor then
+			guard(ctx, info.path, lintTiming, ctx, info)
 			guard(ctx, info.path, lintComponent, ctx, info)
 		end
 	end
