@@ -844,11 +844,11 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				local keys = Curves.bakeToSequenceKeypoints(fn, 12, 0)
 				T.expect(#keys).toBe(12)
 				for _, kp in keys do
-					-- float32 canonical form: relative error < 2^-24
-					T.expect(math.abs(kp[2] - fn(kp[1])) <= 1e-7 * math.max(1, math.abs(kp[2]))).toBe(true)
+					-- 6 decimals (what Json writes), then the float32 canonical form (relative error < 2^-24)
+					T.expect(math.abs(kp[2] - fn(kp[1])) <= 5e-7 + 1e-7 * math.max(1, math.abs(kp[2]))).toBe(true)
 				end
 				T.expect(keys[1][2]).toBe(Codec.normalize("numberRange", fn(0)))
-				T.expect(keys[#keys][2]).toBe(Codec.normalize("numberRange", fn(1)))
+				T.expect(keys[#keys][2]).toBe(Codec.normalize("numberRange", -1.876773)) -- fn(1) = -1.87677282...
 			end)
 
 			T.it("produces keypoints that survive a JSON round trip unchanged (values and envelopes too)", function()

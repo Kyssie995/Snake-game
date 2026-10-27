@@ -49,8 +49,9 @@
 	     samples. Sample times are rounded to 6 decimals (what Json writes) before fn is evaluated.
 	  2. Greedy max-error subdivision: starting from the end points, the sample with the largest error is
 	     inserted as a keypoint until every error is <= tolerance or maxKeypoints is reached.
-	Keypoints lie on the curve (fn(t) rounded to float32 like every sequence number in Codec's canonical form),
-	times are strictly increasing, first 0, last 1, with at most 6 decimals. The result is exactly
+	Keypoints lie on the curve (fn(t) rounded to 6 decimals, what Json writes, and then to float32 like every
+	sequence number in Codec's canonical form; envelopes alike), times are strictly increasing, first 0, last 1,
+	with at most 6 decimals, so the keypoints survive a JSON round trip unchanged. The result is exactly
 	Codec.normalize("numberSequence", ...) of the keypoints ([[t, v], ...], [t, v, e] when the envelope is not 0),
 	except that two equal keypoints stay a list instead of collapsing into a number. The second return value is
 	the largest error of the returned keypoints at the samples, max(|value error|, |envelope error|), measured
@@ -417,6 +418,17 @@ local function tickTime(tick: number): number
 	return math.floor(tick / BAKE_TICKS * 1e6 + 0.5) / 1e6
 end
 
+-- Rounds a keypoint value / envelope to 6 decimals (half away from zero) so that Json writes it exactly (the
+-- float32 shortest decimal of such a number has at most 6 decimals too). Magnitudes >= 2^24 are whole numbers
+-- once stored as float32 anyway.
+local function jsonDecimals(v: number): number
+	if v == 0 or math.abs(v) >= 16777216 then
+		return v
+	end
+	local r = math.floor(math.abs(v) * 1e6 + 0.5) / 1e6
+	return if v < 0 then -r else r
+end
+
 local function bakeSample(fn: (t: number) -> number, label: string, t: number, clampNegative: boolean): number
 	local v: any = fn(t)
 	if not isFinite(v) then
@@ -572,12 +584,12 @@ function Curves.bakeToSequenceKeypoints(
 	local raw: { { number } } = table.create(count)
 	for s = 1, m do
 		if isKey[s] then
-			table.insert(raw, { times[s], values[s], envelopes[s] })
+			table.insert(raw, { times[s], jsonDecimals(values[s]), jsonDecimals(envelopes[s]) })
 		end
 	end
 
-	-- 4. Canonical JSON form (Codec rounds sequence numbers to the shortest float32 decimal, omits zero
-	-- envelopes). Codec collapses two equal keypoints into a plain number; undo that so the result is always
+	-- 4. Canonical JSON form (values were rounded to 6 decimals above; Codec rounds sequence numbers to the
+	-- shortest float32 decimal and omits zero envelopes). Codec collapses two equal keypoints into a plain number; undo that so the result is always
 	-- a keypoint list.
 	local okCanonical, canonical = pcall(Codec.normalize :: any, "numberSequence", raw)
 	if not okCanonical then

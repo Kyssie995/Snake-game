@@ -309,6 +309,10 @@ function Json.encode(value: any, options: EncodeOptions?): string
 			n += 1
 			out[n] = "null"
 		elseif v == EMPTY_OBJECT then
+			-- `{}` is a container level too (decode counts it), so the depth limit applies to it.
+			if depth + 1 > MAX_DEPTH then
+				fail("nesting deeper than " .. MAX_DEPTH .. " levels")
+			end
 			n += 1
 			out[n] = "{}"
 		elseif vt == "table" then

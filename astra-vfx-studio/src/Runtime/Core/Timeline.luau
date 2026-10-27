@@ -21,7 +21,8 @@
 	  position. NaN times sort last. Returns the same table for convenience.
 	* range(actions, t0, t1, includeStart): `actions` must be sorted by time. Returns (first, last) indices of the
 	  actions with t0 < time <= t1 (t0 <= time <= t1 when includeStart is true). The range is empty when
-	  last < first (e.g. t1 < t0, a NaN bound or nothing due), so `for i = first, last do` just works.
+	  last < first (e.g. t1 < t0, a NaN bound or nothing due), so `for i = first, last do` just works. Actions
+	  with NaN times (sorted last) are never due.
 	* snap(t, options): candidates are every finite target within `tolerance` of t and the nearest grid line
 	  (round half up of t / grid; when 1 / grid is a whole number the result is computed as k / (1 / grid), so
 	  grid = 0.1 yields 0.3 rather than 0.30000000000000004). The grid always applies (it is the editor's
@@ -230,13 +231,14 @@ function Timeline.staticSchedule(components: { CompiledComponent }, markers: { M
 	return out
 end
 
--- First index whose time is > t (or >= t when inclusive); #actions + 1 if none.
+-- First index whose time is > t (or >= t when inclusive); #actions + 1 if none. NaN times (sorted last by
+-- Timeline.sort) count as after every t, so they are never due and the search stays monotone.
 local function firstAfter(actions: { ScheduledAction }, t: number, inclusive: boolean): number
 	local lo, hi = 1, #actions + 1
 	while lo < hi do
 		local mid = math.floor((lo + hi) / 2)
 		local mt = actions[mid].time
-		local isAfter = if inclusive then mt >= t else mt > t
+		local isAfter = mt ~= mt or (if inclusive then mt >= t else mt > t)
 		if isAfter then
 			hi = mid
 		else
