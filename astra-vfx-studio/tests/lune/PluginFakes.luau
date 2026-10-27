@@ -112,7 +112,7 @@ function PluginFakes.newPlugin()
 		return self.settings[key]
 	end
 	function plugin:SetSetting(key: string, value: any)
-		assert(not string.find(key, "[%.\"\\\n]"), "invalid plugin setting key: " .. key)
+		assert(not string.find(key, '[%."\\\n]'), "invalid plugin setting key: " .. key)
 		self.settings[key] = value
 	end
 	function plugin:CreateToolbar(name: string)

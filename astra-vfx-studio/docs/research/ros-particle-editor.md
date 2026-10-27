@@ -248,3 +248,80 @@ Erkenntnis, welche Bedürfnisse Nutzer haben.
 - [D5] https://raw.githubusercontent.com/Roblox/creator-docs/main/content/en-us/reference/engine/classes/WireframeHandleAdornment.yaml
 - [D6] https://raw.githubusercontent.com/Roblox/creator-docs/main/content/en-us/studio/plugins.md
 - Lokaler API-Dump Engine 0.745: `/root/tools/ref/Full-API-Dump.json`, `/root/tools/ref/API-Dump.json`
+
+---
+
+## Verifikation (unabhängige Prüfung)
+
+Stand: 2026-10-27 · Prüfer: Verifier-Subagent (skeptisch, unabhängige Suchanfragen). Methode: eigene WebSearch-Abfragen
+(standard + extended, andere Formulierungen als der Researcher), erneuter Download der offiziellen Doku über
+raw.githubusercontent.com (ParticleEmitter.yaml, NumberSequence.yaml, NumberSequenceKeypoint.yaml,
+WireframeHandleAdornment.yaml, Plugin.yaml, Instance.yaml, effects/particle-emitters.md, studio/plugins.md,
+scripting/attributes.md) und eigene Abfragen gegen `/root/tools/ref/API-Dump.json` / `Full-API-Dump.json` (0.745).
+DevForum/YouTube/Creator Store waren weiterhin nur über Such-Snippets einsehbar. Daraus folgt: Produktaussagen können
+höchstens als "REPORTED bestätigt" gelten, nicht als VERIFIED.
+
+**Wichtiger methodischer Befund:** Die Such-Snippets **widersprechen sich bei der Zuordnung von Posts zu Autoren**
+innerhalb des Threads 1668424 (derselbe Inhalt wird mal `roasted_shrimps`, mal "einem Kommentator", mal "dem OP"
+zugeschrieben). Aussagen der Form "der Autor sagte X" sind deshalb nur mit Vorbehalt verwendbar.
+Zusätzlich: Die Angabe "about 1,715 days old" in Snippets ist das **Alter des Threads** (15.02.2022 + 1715 Tage = 27.10.2026),
+**nicht** das Datum einzelner Antworten. Eine Such-Zusammenfassung hat daraus fälschlich "roughly 2022" für den
+Abschalt-Wunsch abgeleitet.
+
+### Ergebnisse je Claim
+
+| Claim | Urteil | Evidenz | Korrektur / Hinweis |
+|---|---|---|---|
+| C5 | CONFIRMED (als REPORTED) | Mehrere unabhängige Abfragen liefern dieselbe Feature-Zeile aus dem Autor-Post ("adjusting size, transparency, and squash of multiple particle emitters"), zusätzlich Matt-Empire-Doku. Quelle: https://devforum.roblox.com/t/the-worlds-best-particle-editor-plugin-99-sure/1668424 | Es ist eine **Selbstbeschreibung** des Autors. Ob die Multi-Edit-Semantik absolut oder relativ ist, bleibt unbekannt. Das Nutzerbedürfnis selbst ist durch die Studio-Threads (C23) unabhängig belegt. |
+| C7 | CONFIRMED (REPORTED) | 26161: Staff sagt, die Engine erlaubt Size bis 200, der Studio-Graph geht nur bis 10, darüber nur per Lua. 79122 (2018): Editor-Kappung bei 10. 983469: 15 springt im Editor auf 10 zurück, per Command Bar klappt es. **Neu:** 3224754 ("Curve Editor Widget needs some UX improvements", nach Thread-ID ca. Ende 2024) meldet weiterhin eine feste Kappung 0–10 ohne einstellbares Min/Max. | Die Kappung ist noch bis ca. 2024 berichtet, nicht nur "historisch". Den Engine-Wert 200 nennt nur ein alter Staff-Post (ca. 2016); für 2026 ist er **nicht** verifiziert und muss in Studio getestet werden. |
+| C8 | PARTIAL | Trajektorien-Linien sind mehrfach bestätigt ("blue lines show where particles are expected to move", aquafarbene Spawn-Linien). | **"Blau" ist veraltet:** Laut Update (16.02.2022) wurde auf `LineHandleAdornment` umgestellt, Linienfarbe = Partikelfarbe. "Nachweislich hoher Lernwert" ist überzogen: Belegt sind nur 2–3 positive Kommentare. Besser: "von Nutzern gelobt". |
+| C14 | PARTIAL | Bestätigt: Es gab einen Wunsch nach einem "curve-mapping tool" (Partikel folgen einer Bezier-Kurve). Bestätigt ist auch die Begründung "Pfad ergibt sich aus CFrame, Speed, Acceleration, Drag". | **Zuordnung unsicher:** Eine Suche schreibt die Begründung `roasted_shrimps` zu. Drei andere nennen sie "a reply … one commenter's opinion, not an official answer" bzw. sagen, der **Fragesteller selbst** habe gezweifelt. "Vom Autor abgelehnt" ist also **nicht gesichert**. Die technische Folgerung (native Emitter folgen keinem Pfad) stimmt aber laut offizieller Doku: Bewegung nur über Speed/Acceleration/Drag/VelocityInheritance/LockedToPart (ParticleEmitter.yaml, VERIFIED). |
+| C15 | CONFIRMED (REPORTED) | Mehrere unabhängige Snippets: "does not work … error when clicking Size, Transparency". | – |
+| C16 | PARTIAL | Inhalt mehrfach bestätigt: Der "Bezier sequencer" wirft einen Fehler, wenn ein Emitter in einem externen Editor geändert wird; das fehlerhafte Plugin gehört nicht dem Antwortenden. Ebenfalls belegt: "it is the Bezier Sequencer that will become broken, not the Ros Editor". | **Zuordnung/Datierung unklar:** Ein Snippet datiert Post #18 auf **14.08.2023** und ordnet ihn `roasted_shrimps` zu. Der Text ("ist es dauerhaft kaputt? … erscheint gar nicht") liest sich aber wie ein **Nutzer, der die Autor-Erklärung zitiert**. **Gegenevidenz zur Vollständigkeit:** Nutzer *hodog* (#22, 11.01.2026) hat den Bezier Sequencer **nicht** installiert, und das Plugin erscheint trotzdem nicht. Der Plugin-Konflikt erklärt also **nicht alle** Ausfälle. Die ASTRA-Folgerung (Koexistenz) bleibt richtig. |
+| C17 | UNVERIFIABLE | Der Link "BezierSequence" (8133535339) in der Beschreibung von Video TrFiKIr7K-4 ist per Snippet bestätigt. Eine eigene Listing-Seite, Features oder Code von BezierSequence sind **nicht** indexiert. | Dass "Bezier Sequencer" = BezierSequence ist und welcher Mechanismus den Fehler auslöst, bleibt ASSUMPTION. Die Folgerung (Bake-Hash, Re-Import) ist davon unabhängig sinnvoll. |
+| C19 | CONFIRMED (REPORTED) | Seite 2 des Threads: Nutzer *hodog*, Post #22, **11.01.2026**: "why isn't there an option to disable it from plugins? … don't want it to always run or show up, if I'm not working on vfx". Keine Autor-Antwort sichtbar. Danach #23 (nix102on, 08.02.2026, Lob). Quelle: https://devforum.roblox.com/t/the-worlds-best-particle-editor-plugin-99-sure/1668424?page=2 | Ergänzung: Derselbe Post meldet "erscheint nicht", obwohl kein Bezier Sequencer installiert ist (siehe C16). Thread-Größe: Seite 2 zeigt Posts bis #23 (≥ 22 Replies). Das Tag-Listing nennt 20–21. |
+| C23 | PARTIAL | Bestätigt: Mass-Edit von Sequences im Properties-Fenster war nicht möglich. Staff: "known limitation (missing feature, rather than a bug)" (2083516) bzw. "working as designed … these types have never supported multi-instance editing" (1071269/425043). Die Begründung "kein sinnvoller Startwert" ist so **wörtlich nicht gefunden**. Am nächsten kommt eine staff-nahe Erklärung: Eine Änderung würde sofort alle Sequences überschreiben, und "Reset" könnte die individuellen Vorwerte nicht wiederherstellen. Vorschlag dort: Warnhinweis "Wert des ersten Objekts wird auf alle angewendet". | **Gegenevidenz:** In 425043 steht ein Post "I just enabled a change that will allow you to select multiple sequence properties and edit them at the same time" (Autor/Datum im Snippet nicht bestätigt). Gleichzeitig fragt ein Nutzer 2023 noch danach. Eine Bestätigung für 2025/2026 fehlt, auch nicht in den UI-Styling-Release-Notes, die die Sequence-Dialoge betreffen. Der Stand 2026 muss **in Studio getestet** werden. |
+| C24 | CONFIRMED (VERIFIED, Stichprobe) | Full-API-Dump 0.745: Size `0 1 0 1 1 0`, Transparency/Squash `0 0 0 1 0 0`, alle Typ `NumberSequence`. particle-emitters.md und ParticleEmitter.yaml: Squash > 0 → horizontal schmaler, vertikal größer. | – |
+| C25 | CONFIRMED (VERIFIED) | NumberSequence.yaml: "ordered by non-descending time, starting at time 0 and ending at time 1, with a maximum of 20 keypoints". NumberSequenceKeypoint.yaml: Envelope nicht negativ, Ausgabe in [value − envelope, value + envelope]; "The engine linearly interpolates values and envelopes between consecutive keypoints". | **Präzisierung:** Der Konstruktor-Text sagt "**non-descending**", andere Stellen sagen "ascending". Gleiche Zeitwerte (harte Stufen) sind also wahrscheinlich zulässig. Der ASTRA-Validator sollte gleiche Times **nicht** pauschal ablehnen; das muss in Studio getestet werden. Interpoliert werden auch die **Envelopes** linear. |
+| C26 | CONFIRMED (VERIFIED) | ParticleEmitter.yaml: Acceleration auf globalen Achsen; Drag = Halbwertszeit der Geschwindigkeit, negativ → exponentielles Wachstum; Drag skaliert Speed und VelocityInheritance. particle-emitters.md: Lifetime intern auf 20 s gedeckelt; WindAffectsDrag nur bei Drag > 0; Speed-Änderung wirkt nicht auf schon aktive Partikel. Alle Properties sind im API-Dump vorhanden. | Ergänzung (REPORTED): DevForum 876765 berichtet, dass ein geschlossenes Formelmodell nur bei konstanter Geschwindigkeit passte, **nicht** mit Acceleration. Das stützt die "empirisch kalibrieren"-Folgerung: https://devforum.roblox.com/t/how-does-robloxs-particle-emitter-drag-affect-the-acceleration-of-the-particle-is-there-a-way-to-trace-the-path/876765 |
+| C27 | CONFIRMED (VERIFIED, Stichprobe) | ParticleEmitter.yaml: "To emit and render particles, it must be parented to a BasePart or an Attachment within such a part". API-Dump: `Bone.Superclass = Attachment`. | Ergänzung: particle-emitters.md: Unter einem Attachment werden die Shapes Sphere/Cylinder **nicht korrekt dargestellt**. Das Spawn-Gizmo muss das abbilden. |
+| C28 | CONFIRMED (VERIFIED) | API-Dump: `AddLine(from, to)`, `AddLines(points)`, `AddPath(points, loop)`, `AddText(point, text, size)`, `Clear()`, Properties Scale/Thickness. Superclass `HandleAdornment`. `LineHandleAdornment` und `ConeHandleAdornment` existieren. | **Wichtige Ergänzungen (VERIFIED, WireframeHandleAdornment.yaml):** (1) Punkte sind **relativ zur Mitte des `Adornee`** und nicht in Weltkoordinaten. Für Emitter an Attachments muss ASTRA also in den Adornee-Raum umrechnen. (2) `Color3`, `Thickness` und `Transparency` wirken **nur auf später gezeichnete Linien**. Umfärben heißt `Clear()` und neu zeichnen. (3) `Thickness` ist in Pixeln und skaliert nicht mit der Distanz. |
+| C29 | CONFIRMED (VERIFIED) | API-Dump: `CreateDockWidgetPluginGui` Tags `[Yields, Deprecated]`, `CreateDockWidgetPluginGuiAsync` Tags `[Yields]`. Plugin.yaml: "superseded by CreateDockWidgetPluginGuiAsync()". Vorhanden: `GetSetting`/`SetSetting`, `Unloading`, `TryBeginRecording(name, displayName?) → string?`, `FinishRecording(identifier, operation, finalOptions?)`. | Quellenkorrektur: Die Deprecation steht in Plugin.yaml/API-Dump, **nicht** in studio/plugins.md. plugins.md belegt aber: höchstens **eine aktive Recording pro Plugin**, und ein Reload bricht laufende Recordings **nicht** ab (Recording-ID z. B. in einem Attribute merken). |
+| C31 | UNVERIFIABLE (IDEA) | Keine Gegenevidenz. Die Idee passt zu den von Staff genannten Problemen (Überschreiben aller Werte, Reset der Einzelwerte) und adressiert sie gezielt. | Gute Ergänzung: Ein "Reset" pro Emitter auf den individuellen Vorwert, und ein Multi-Edit als **eine** Undo-Recording. |
+| C33 | UNVERIFIABLE (IDEA) | Machbarkeit belegt: `GetPropertyChangedSignal` (im Dump in Klasse `Object`), `AttributeChanged`/`GetAttributeChangedSignal` (Instance). Attribute-Namensregeln (Instance.yaml, SetAttribute): alphanumerisch plus `. - / _`, ≤ 100 Zeichen, kein Präfix `RBX`. `ASTRA_…` ist also zulässig. | **Fallstricke:** (a) Keypoint-Werte werden im Dateiformat als **float32** gespeichert (rbx-dom-Spezifikation, REPORTED; Laufzeit-Präzision unverifiziert). Der Bake-Hash muss deshalb auf quantisierten Werten beruhen, sonst gibt es Fehlalarme "extern geändert" nach dem Zurücklesen. (b) Das eigene Schreiben löst den Changed-Handler ebenfalls aus. Ein Re-Entrancy-Guard ist nötig (ASSUMPTION, Standardverhalten). |
+
+### Neu entdeckte Fakten (nicht in den ursprünglichen Notes)
+
+1. **Sicherheits-/Vertrauens-Report (REPORTED, Zuordnung unklar):** Im Thread hat jemand die Plugin-Skripte durchgesehen und
+   ein "verdächtiges" Skript namens *"There's a scary monster in here"* gefunden. Beschrieben wird es als Code, der
+   Performance-Probleme verursachen soll. Eine Auflösung ist im Snippet nicht sichtbar. Quelle: [S1]. Für ASTRA (critical): nachvollziehbarer,
+   nicht obfuskierter Plugin-Code, keine versteckten Skripte, und ein Runtime-Modul ohne Seiteneffekte. Das ist ein Vertrauensfaktor bei VFX-Plugins.
+2. **Ausfälle nicht nur durch den Plugin-Konflikt (REPORTED, critical):** *hodog* (#22, 11.01.2026) hat keinen Bezier Sequencer
+   installiert, und ROS erscheint trotzdem nicht. Robustheitstests von ASTRA müssen also auch den Fall "kein Fremd-Plugin" abdecken
+   (Initialisierungsfehler, API-Änderungen in Studio).
+3. **Möglicher Emit-Preview in ROS (REPORTED, schwach):** Der Thread "Vfx difference in RosParticle and emitParticle"
+   (https://devforum.roblox.com/t/vfx-difference-in-rosparticle-and-emitparticle/2441406) meldet unterschiedliche Ergebnisse
+   zwischen Plugin-Vorschau und Skript. Erklärung dort: Das Plugin nutzt `Emit()` (Burst) statt `Enabled = true`. Ob "RosParticle"
+   ROS meint, ist unbestätigt. Das relativiert F8 ("kein Emit-Button belegt") und zeigt: **Preview und Runtime müssen sich identisch verhalten**
+   (critical für ASTRA). Preview und Runtime-Modul sollten denselben Emit-Pfad nutzen.
+4. **Studio-Kappung 0–10 noch ca. 2024 gemeldet (REPORTED):** 3224754. Die Soft-Range-Idee aus C7 bleibt also relevant.
+5. **NumberSequence-Zeiten "non-descending" (VERIFIED, Doku-Wortlaut):** Gleiche Keypoint-Times sind vermutlich erlaubt (harte Stufen).
+   Für Bake und Validator ist das critical.
+6. **WireframeHandleAdornment-Semantik (VERIFIED):** Koordinaten relativ zur Adornee-Mitte; Style-Änderungen wirken nur auf
+   neue Linien; Thickness in Pixeln. Das ist critical für das Gizmo-Design.
+7. **ChangeHistoryService-Reload (VERIFIED, plugins.md):** Ein Reload bricht laufende Recordings nicht ab; die ID muss gespeichert und beim Start aufgeräumt werden.
+8. **float32-Speicherung der Keypoints (REPORTED, rbx-dom-Format):** Bake-Hash und Vergleich brauchen eine Toleranz oder Quantisierung.
+9. **Attachment + Sphere/Cylinder-Shape stellt sich falsch dar (VERIFIED, particle-emitters.md):** Validator-Warnung und Gizmo-Hinweis.
+10. **Wartungsstatus (K11) bleibt ASSUMPTION:** Es gibt Thread-Aktivität im Aug. 2023 sowie im Jan./Feb. 2026. Ob der Autor nach Feb. 2022 noch
+    geantwortet hat, ist wegen der widersprüchlichen Zuordnung nicht entscheidbar.
+
+### Zusätzliche Quellen der Verifikation
+- https://devforum.roblox.com/t/curve-editor-widget-needs-some-ux-improvements/3224754
+- https://devforum.roblox.com/t/is-there-an-easier-way-to-make-a-size-sequence-goal-higher-than-10/983469
+- https://devforum.roblox.com/t/vfx-difference-in-rosparticle-and-emitparticle/2441406
+- https://devforum.roblox.com/t/how-does-robloxs-particle-emitter-drag-affect-the-acceleration-of-the-particle-is-there-a-way-to-trace-the-path/876765
+- https://devforum.roblox.com/t/increase-or-remove-the-numbersequence-keypoint-limit/188572
+- https://dom.rojo.space/attributes.html (NumberSequenceKeypoint als 3× f32)
+- https://raw.githubusercontent.com/Roblox/creator-docs/main/content/en-us/reference/engine/classes/Plugin.yaml
+- https://raw.githubusercontent.com/Roblox/creator-docs/main/content/en-us/reference/engine/classes/Instance.yaml
+- https://raw.githubusercontent.com/Roblox/creator-docs/main/content/en-us/scripting/attributes.md

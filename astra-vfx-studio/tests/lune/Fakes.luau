@@ -251,8 +251,27 @@ function Fakes.install(): Fakes
 	end
 	-- GUI events (fire only when a test fires them via fakes:signalFor(inst, name):Fire(...))
 	local guiEvents = {
-		GuiObject = { "InputBegan", "InputChanged", "InputEnded", "MouseEnter", "MouseLeave", "MouseMoved", "MouseWheelForward", "MouseWheelBackward", "SelectionGained", "SelectionLost" },
-		GuiButton = { "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up", "MouseButton2Click", "MouseButton2Down", "MouseButton2Up" },
+		GuiObject = {
+			"InputBegan",
+			"InputChanged",
+			"InputEnded",
+			"MouseEnter",
+			"MouseLeave",
+			"MouseMoved",
+			"MouseWheelForward",
+			"MouseWheelBackward",
+			"SelectionGained",
+			"SelectionLost",
+		},
+		GuiButton = {
+			"Activated",
+			"MouseButton1Click",
+			"MouseButton1Down",
+			"MouseButton1Up",
+			"MouseButton2Click",
+			"MouseButton2Down",
+			"MouseButton2Up",
+		},
 		TextBox = { "FocusLost", "Focused", "ReturnPressedFromOnScreenKeyboard" },
 		Path2D = { "ControlPointChanged" },
 	}

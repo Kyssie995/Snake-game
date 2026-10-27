@@ -133,7 +133,12 @@ function Harness.context(self: any, componentsById: { [string]: any }?, options:
 end
 
 -- Builds one component; returns (controller, compiledComponent, buildContext).
-function Harness.build(self: any, componentType: string, jsonProps: { [string]: any }?, options: Options?): (any, any, any)
+function Harness.build(
+	self: any,
+	componentType: string,
+	jsonProps: { [string]: any }?,
+	options: Options?
+): (any, any, any)
 	local component = self:compile(componentType, jsonProps, options)
 	local ctx = self:context({ [component.id] = component }, options)
 	local descriptor = self.Components.get(componentType)
