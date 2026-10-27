@@ -217,7 +217,9 @@ validieren Name (nur registrierte Effekte), klemmen Skalierung/Zeitfaktor und sp
 | High (Desktop) | 1.0 | 1.0 | 1.0 | wie definiert | unbegrenzt |
 
 `count`-Eigenschaften (Rate, Burst-Anzahl, Trümmeranzahl) werden mit `countScale` multipliziert, `segments` mit
-`segmentScale`. Weniger, dafür etwas größere Partikel (`sizeCompensation`) halten die Silhouette. Komponenten mit
+`segmentScale` (nur prozedurale Segmente wie Ring-, Blitz- und Schockwellen-Unterteilungen – **nicht**
+`Beam.Segments`: die Engine reduziert Beam-Segmente bei niedriger Grafikqualität selbst, und Farbverläufe brauchen
+mindestens n−1 Segmente, siehe Constraints K14). Weniger, dafür etwas größere Partikel (`sizeCompensation`) halten die Silhouette. Komponenten mit
 `minQuality` werden unterhalb dieser Stufe weggelassen; `qualityOverrides` erlaubt gezielte Werte pro Stufe.
 `"Auto"` liest auf Clients die Grafikqualität des Spielers (siehe Constraints-Dokument); Server und Studio
 verwenden Medium bzw. die Editor-Einstellung.
@@ -278,8 +280,9 @@ Plugin/
 
 ### 7.3 Vorschau
 
-* Das Plugin initialisiert den Editor nur im Edit-DataModel (`RunService:IsEdit()`); Plugins laufen während
-  Playtests auch in den Play-DataModels.
+* Das Plugin initialisiert den Editor nur, wenn `StudioTestService.EditModeActive == true` **und**
+  `RunService:IsEdit()` gilt (Plugins laufen während Playtests auch in den Play-DataModels; `IsEdit()` allein ist beim
+  Start unzuverlässig – Constraints K37). Während eines Playtests im Edit-DataModel pausiert der Editor.
 * Die Vorschau-Uhr läuft über `RunService.Heartbeat`. Dass Heartbeat im reinen Edit-Modus für Plugins feuert, ist
   nicht offiziell dokumentiert (Annahme, breite Praxis) und steht als erster Punkt in der manuellen Studio-Testliste.
 * **Primär: Workspace-Vorschau.** Effekt wird mit dem Runtime-Builder (Preview-Modus) in einen eigenen Ordner
@@ -309,13 +312,16 @@ Plugin/
 
 Zuverlässigster Weg ohne externe KI-API und ohne Studio-Zugriff für Claude:
 
-1. **Dateien als Schnittstelle.** Claude schreibt `effects/<Name>.json` nach `docs/EFFECT_FORMAT.md` (bzw. dem
-   JSON-Schema) und prüft lokal: `lune run tools/astra validate effects/X.json`, `… analyze`, `… format`.
+1. **Dateien als Schnittstelle.** Claude schreibt `effects/<Name>.vfx.json` nach `docs/EFFECT_FORMAT.md` (bzw. dem
+   JSON-Schema) und prüft lokal: `lune run tools/astra validate effects/X.vfx.json`, `… analyze`, `… format`.
 2. **CLI erzeugt echte Roblox-Dateien.** `lune run tools/astra build effects/X.json -o build/X.rbxm` baut mit dem
    **selben** Builder wie die Runtime ein Modell (Laufzeitpaket + Effektmodul bzw. statisches Modell), das man in
    Studio einfügt.
-3. **Wege nach Studio** (vom Nutzer gewählt): (a) Rojo synchronisiert `effects/` in den Place (JSON → ModuleScript),
-   die Library erkennt diese Quellen; (b) Datei-Import im Plugin (`StudioService:PromptImportFileAsync`);
+3. **Wege nach Studio** (vom Nutzer gewählt): (a) Rojo synchronisiert `effects/*.vfx.json` per `syncRules`
+   (`"use": "text"`) als `StringValue` mit dem **unveränderten JSON-Text** in `ServerStorage.AstraVFX.Sources`; die
+   Library erkennt diese Quellen. Rückweg ohne Bridge: `rojo syncback` schreibt geänderte StringValues byte-genau in
+   die `*.vfx.json` zurück. (JSON → ModuleScript wird bewusst **nicht** genutzt: verlustbehaftet – Schlüssel sortiert,
+   `[]`/`{}` ununterscheidbar, `null` verloren; Constraints TC-2/K46.) (b) Datei-Import im Plugin (`StudioService:PromptImportFileAsync`);
    (c) optionale, ausdrücklich aktivierte localhost-Bridge (`lune run tools/astra bridge`) mit Token – das Plugin
    kann Effekte live laden und zurückschreiben.
 4. **Strukturierte Generierung.** `Authoring/Generator` setzt Textbeschreibungen regelbasiert in mehrschichtige

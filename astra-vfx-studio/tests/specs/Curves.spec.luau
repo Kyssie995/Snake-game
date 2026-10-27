@@ -4,6 +4,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 	local Codec = use("AstraVFX.Core.Codec")
 	local Easing = use("AstraVFX.Core.Easing")
 	local Random = use("AstraVFX.Core.Random")
+	local Json = use("AstraVFX.Core.Json")
 
 	-- Builds a mixed-type array (the type checker infers homogeneous arrays from literals).
 	local function L(...: any): { any }
@@ -848,6 +849,38 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				end
 				T.expect(keys[1][2]).toBe(Codec.normalize("numberRange", fn(0)))
 				T.expect(keys[#keys][2]).toBe(Codec.normalize("numberRange", fn(1)))
+			end)
+
+			T.it("produces keypoints that survive a JSON round trip unchanged (values and envelopes too)", function()
+				-- The SequenceEditor stores baked keypoints in the definition; saving and reloading it must not
+				-- change them (Json writes at most 6 decimals).
+				local cases: { any } = {
+					{ Easing.get("Sine", "In"), nil },
+					{ Easing.get("Bounce", "Out"), nil },
+					{ Easing.get("Elastic", "Out"), nil },
+					{
+						function(t: number): number
+							return 0.001 * t * t
+						end,
+						nil,
+					},
+					{
+						function(t: number): number
+							return math.sin(t * 5) * 3 + 1
+						end,
+						function(t: number): number
+							return 0.1234567 * t
+						end,
+					},
+				}
+				for i, case in cases do
+					local keys, err = Curves.bakeToSequenceKeypoints(case[1], 20, 1e-7, case[2])
+					local ok, back = Json.decode(Json.encode(keys, { pretty = false }))
+					T.expect(ok).toBe(true)
+					T.expect({ case = i, keys = back }).toEqual({ case = i, keys = keys })
+					T.expect(Codec.normalize("numberSequence", back)).toEqual(keys)
+					T.expect(err).toBeLessThan(1)
+				end
 			end)
 
 			T.it("produces canonical keypoints that Codec accepts and the evaluator reproduces", function()

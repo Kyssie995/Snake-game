@@ -1295,6 +1295,77 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			end
 		end)
 
+		T.it("keeps pin order at equal times reached later through delays", function()
+			-- The same structure must order its equal-time actions identically whether the branches meet at the
+			-- trigger time or later (last-writer-wins actions such as SetProperty depend on it).
+			local function counts(seconds: number): { number }
+				local g = G({
+					N("p", "OnPlay"),
+					N("par", "Parallel", { count = 3 }),
+					N("d1", "Delay", { seconds = seconds }),
+					N("d2", "Delay", { seconds = seconds }),
+					N("d3a", "Delay", { seconds = seconds / 2 }),
+					N("d3b", "Delay", { seconds = seconds / 2 }),
+					N("e1", "Emit", { target = "fx", count = 1 }),
+					N("e2", "Emit", { target = "fx", count = 2 }),
+					N("e3", "Emit", { target = "fx", count = 3 }),
+				}, {
+					L("p.out", "par.in"),
+					L("par.out1", "d1.in"),
+					L("d1.out", "e1.in"),
+					L("par.out2", "d2.in"),
+					L("d2.out", "e2.in"),
+					L("par.out3", "d3a.in"),
+					L("d3a.out", "d3b.in"),
+					L("d3b.out", "e3.in"),
+				})
+				return emitCounts(run(g))
+			end
+			T.expect(counts(0)).toEqual({ 1, 2, 3 })
+			T.expect(counts(0.5)).toEqual({ 1, 2, 3 })
+		end)
+
+		T.it("runs Loop iterations in index order (and completed last) when their flows meet later", function()
+			local g = G({
+				N("p", "OnPlay"),
+				N("l", "Loop", { count = 3, interval = 0 }),
+				N("d", "Delay", { seconds = 1 }),
+				N("dc", "Delay", { seconds = 1 }),
+				N("m", "Math", { op = "add", b = 1 }),
+				N("e", "Emit", { target = "fx" }),
+				N("c", "Emit", { target = "fx", count = 99 }),
+			}, {
+				L("p.out", "l.in"),
+				L("l.body", "d.in"),
+				L("d.out", "e.in"),
+				L("l.index", "m.a"),
+				L("m.result", "e.count"),
+				L("l.completed", "dc.in"),
+				L("dc.out", "c.in"),
+			})
+			local list = run(g)
+			T.expect(emitCounts(list)).toEqual({ 1, 2, 3, 99 })
+			for _, a in list do
+				T.expect(a.time).toBe(1)
+			end
+		end)
+
+		T.it("runs a Tween's out flow before its done flow when both reach the same later time", function()
+			local g = G({
+				N("p", "OnPlay"),
+				N("tw", "Tween", { target = "cx", channel = "rate", value = 1, duration = 0.5 }),
+				N("d", "Delay", { seconds = 0.5 }),
+				N("eOut", "Emit", { target = "fx", count = 1 }),
+				N("eDone", "Emit", { target = "fx", count = 2 }),
+			}, {
+				L("p.out", "tw.in"),
+				L("tw.out", "d.in"),
+				L("d.out", "eOut.in"),
+				L("tw.done", "eDone.in"),
+			})
+			T.expect(emitCounts(run(g))).toEqual({ 1, 2 })
+		end)
+
 		T.it("Loop fires body per iteration with a 0-based index and completed after count * interval", function()
 			local g = G({
 				N("p", "OnPlay"),

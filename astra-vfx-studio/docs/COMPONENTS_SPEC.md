@@ -110,7 +110,7 @@ roll is empirical).
 | transparency | numberSequence | `0` | 0..1 | Transparency |
 | width0 / width1 | number | `1` | 0..1000, length | Width0/Width1 (linear only — no width curve along the length) |
 | curveSize0 / curveSize1 | number | `0` | −1000..1000, length | CurveSize0/1 |
-| segments | integer | `10` | 1..1000, segments | Segments (≥ keypoints − 1 for gradients) |
+| segments | integer | `10` | 1..1000 (NO quality scaling — the engine reduces beam segments itself; gradients need ≥ keypoints − 1) | Segments |
 | textureLength | number | `1` | 0.01..1000, length | TextureLength |
 | textureMode | enum TextureMode | `"Stretch"` | | TextureMode |
 | textureSpeed | number | `1` | −100..100 | TextureSpeed |

@@ -14,6 +14,7 @@
 	  X.server.luau       -> Script, X.client.luau -> LocalScript
 	  X.json              -> ModuleScript returning the decoded JSON (Rojo "JSON module")
 	  X.txt               -> StringValue
+	  syncRules           -> "*<suffix>" patterns with use = "text" (e.g. *.vfx.json -> StringValue, raw text)
 	  *.meta.json, *.model.json, *.project.json -> ignored
 ]]
 
@@ -38,6 +39,7 @@ export type Loader = typeof(setmetatable(
 		loading: { [any]: boolean },
 		globals: { [string]: any },
 		game: any,
+		syncRules: { { pattern: string, use: string, suffix: string? } },
 	},
 	Loader
 ))
@@ -152,10 +154,12 @@ function Loader.new(projectDir: string, projectFile: string?): Loader
 		loading = {},
 		globals = {},
 		game = Instance.new("DataModel"),
+		syncRules = {},
 	}, Loader)
 	self.globals = baseGlobals(self.game)
 	local projectPath = join(projectDir, projectFile or "default.project.json")
 	local project = serde.decode("json", fs.readFile(projectPath))
+	self.syncRules = project.syncRules or {}
 	self.root = self:_buildNode(project.name, project.tree)
 	return self
 end
@@ -239,6 +243,20 @@ end
 function Loader._buildEntry(self: Loader, path: string, entry: string): any?
 	if fs.isDir(path) then
 		return self:_buildPath(entry, path)
+	end
+	-- Rojo syncRules (subset: patterns of the form "*<suffix>", use = "text" -> StringValue with the raw file text)
+	for _, rule in self.syncRules do
+		local patternSuffix = string.match(rule.pattern, "^%*(.+)$")
+		if patternSuffix and endsWith(entry, patternSuffix) then
+			if rule.use == "text" then
+				local inst = Instance.new("StringValue")
+				inst.Name = stripSuffix(entry, rule.suffix or patternSuffix)
+				inst.Value = fs.readFile(path)
+				self.paths[inst] = path
+				return inst
+			end
+			error("Loader: unsupported syncRule use '" .. tostring(rule.use) .. "' for " .. path)
+		end
 	end
 	for _, suffix in IGNORED_SUFFIXES do
 		if endsWith(entry, suffix) then

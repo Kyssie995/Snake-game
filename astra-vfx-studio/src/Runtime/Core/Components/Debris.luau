@@ -420,6 +420,10 @@ local descriptor: Types.ComponentDescriptor = {
 		local transparency: number = props.transparency
 		local color: Color3 = props.color
 		local world: CFrame? = nil
+		-- Placement cache: skip the per-part CFrame work when neither the transform nor the local state changed.
+		local evaluations = 0
+		local placedWorld: CFrame? = nil
+		local placedEvaluation = -1
 		local fade = 0
 		local locals: { CFrame } = {}
 
@@ -428,6 +432,7 @@ local descriptor: Types.ComponentDescriptor = {
 		local writtenColor: Color3? = nil
 
 		local function evaluate()
+			evaluations += 1
 			local t = math.max(localTime, 0)
 			fade = if fadeLength > 0 then math.clamp((t - fadeStart) / fadeLength, 0, 1) else 0
 			for i, piece in pieces do
@@ -473,9 +478,11 @@ local descriptor: Types.ComponentDescriptor = {
 
 		local function place(frame: FrameContext)
 			local w = world
-			if w == nil then
+			if w == nil or (w == placedWorld and evaluations == placedEvaluation) then
 				return
 			end
+			placedWorld = w
+			placedEvaluation = evaluations
 			for i in parts do
 				mover.move(frame, i, w * locals[i])
 			end
@@ -488,6 +495,7 @@ local descriptor: Types.ComponentDescriptor = {
 			transparency = props.transparency
 			color = props.color
 			world = nil
+			placedWorld = nil
 			mover.forget()
 			evaluate()
 			refresh()

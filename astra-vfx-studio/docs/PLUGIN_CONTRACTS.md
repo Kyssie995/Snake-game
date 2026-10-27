@@ -39,7 +39,9 @@
 ## 1. Module map (`src/Plugin`)
 
 ```
-init.server.luau     Bootstrap. if not RunService:IsEdit() then return end. Creates App, wires plugin.Unloading.
+init.server.luau     Bootstrap. Starts the App only when StudioTestService.EditModeActive == true and RunService:IsEdit()
+                     (pcall-read; plugins also run in Play DataModels). Pauses the editor while EditModeActive is false
+                     (playtest from the edit DataModel). Wires plugin.Unloading -> app:shutdown().
 App.luau             App.new(plugin) -> App ; app:start() ; app:shutdown()  (idempotent)
 Editor.luau          controller + state (§2)
 Studio/History.luau  ChangeHistoryService wrapper (§3)
@@ -143,9 +145,10 @@ storage:readSource(entry) -> (EffectDefinition?, { Diagnostic })  -- synced Modu
 storage.changed: Signal(id: string, reason: "external"|"added"|"removed"|"written")
 storage:destroy()
 ```
-Synced sources: ModuleScripts/StringValues with the CollectionService tag `AstraEffectSource`, or children of
-`ServerStorage.AstraVFX.Sources` / `ReplicatedStorage.AstraVFX.Effects` (exported effects). ModuleScripts are read
-with `require(module:Clone())` (fresh require), StringValues/`.json` text with `Json.decode`. Storage watches its
+Synced sources: StringValues (JSON text) in `ServerStorage.AstraVFX.Sources` — this is where Rojo puts
+`effects/*.vfx.json` via `syncRules` `"use": "text"` (raw text, lossless) — or tagged `AstraEffectSource` anywhere, plus
+exported effect ModuleScripts in `ReplicatedStorage.AstraVFX.Effects` (read with `require(module:Clone())`, i.e. a
+fresh require). Rojo JSON→ModuleScript conversion is lossy and therefore not used for sources. Storage watches its
 folders (ChildAdded/ChildRemoved, `Changed` on values) and compares the value with the last text it wrote itself to
 classify changes as "external". Values above 190 000 characters are rejected with a diagnostic.
 

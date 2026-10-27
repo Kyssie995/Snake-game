@@ -306,6 +306,10 @@ local descriptor: Types.ComponentDescriptor = {
 		local transparency: number = props.transparency
 		local color: Color3 = props.color
 		local world: CFrame? = nil
+		-- Placement cache: skip the per-part CFrame work when neither the transform nor the local state changed.
+		local evaluations = 0
+		local placedWorld: CFrame? = nil
+		local placedEvaluation = -1
 
 		-- Geometry at the current local time (shared by every spike).
 		local centre = 0
@@ -317,6 +321,7 @@ local descriptor: Types.ComponentDescriptor = {
 		local writtenColor: Color3? = nil
 
 		local function evaluate()
+			evaluations += 1
 			local u = math.clamp(localTime / span, 0, 1)
 			local head = startRadius + (endRadius - startRadius) * headEase(u)
 			local tail = startRadius + (endRadius - startRadius) * tailEase(u)
@@ -352,9 +357,11 @@ local descriptor: Types.ComponentDescriptor = {
 
 		local function place(frame: FrameContext)
 			local w = world
-			if w == nil then
+			if w == nil or (w == placedWorld and evaluations == placedEvaluation) then
 				return
 			end
+			placedWorld = w
+			placedEvaluation = evaluations
 			for i, direction in directions do
 				mover.move(frame, i, w * (rotations[i] + direction * centre))
 			end
@@ -367,6 +374,7 @@ local descriptor: Types.ComponentDescriptor = {
 			transparency = props.transparency
 			color = props.color
 			world = nil
+			placedWorld = nil
 			mover.forget()
 			evaluate()
 			refresh()
@@ -458,9 +466,7 @@ local descriptor: Types.ComponentDescriptor = {
 		-- Procedural motion: every spike moves every frame while the burst plays.
 		cost.movingParts = n
 		-- Heuristic: one Size write per spike per frame, + one per tracked appearance channel.
-		cost.propertyUpdates = n
-			+ (if tracks.transparency then n else 0)
-			+ (if tracks.color then n else 0)
+		cost.propertyUpdates = n + (if tracks.transparency then n else 0) + (if tracks.color then n else 0)
 		local translucent = tracks.transparency ~= nil
 			or (props.transparency > 0 and props.transparency < 1)
 			or isSeeThrough(props.material)

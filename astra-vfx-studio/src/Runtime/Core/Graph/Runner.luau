@@ -15,9 +15,12 @@
 	    whose name == trigger.id ("event"), in node order; their "out" fires at startTime. A non-finite startTime
 	    means 0, or the marker's time for marker triggers. (Graph.staticSchedule runs play at 0 and every marker
 	    at its time.)
-	  * Unrolling uses an explicit priority queue ordered by (time, LIFO among equal times): flows are processed
-	    in time order, and at equal times depth-first in pin order (out1 before out2, iteration 0 before 1, a
-	    Tween's "out" flow before "done" at duration 0, all Loop bodies before "completed" at interval 0).
+	  * Unrolling uses an explicit priority queue ordered by (time, path): flows are processed in time order, and
+	    at equal times in depth-first pin order of the unrolled flow tree, whether the flows meet at the trigger
+	    time or later through Delays (out1 before out2, iteration 0 before 1, a Tween's "out" flow before "done",
+	    all Loop bodies before "completed"). A path is the list of branch indices from the trigger root (root
+	    position, then out_i / then_i = i, Loop body = index + 1, completed = count + 1, Tween out = 1 / done = 2),
+	    packed big-endian so that byte-wise string order is the lexicographic tree order.
 	    The returned actions are therefore sorted by time; `order` is the 1-based emission index.
 	  * Delay(seconds): out at t + seconds. Sequence(count, interval): then_i at t + (i - 1) * interval.
 	    Parallel(count): out_i at t. Loop(count, interval): body at t + i * interval for i = 0..count-1, each in
@@ -349,7 +352,8 @@ type Context = {
 	memo: { [string]: any }, -- node id -> outputs table | IN_PROGRESS
 }
 
-type Item = { time: number, seq: number, node: string, ctx: Context }
+-- path: branch indices from the trigger root (see the module header), packed so that `<` is tree order.
+type Item = { time: number, path: string, node: string, ctx: Context }
 
 type State = {
 	compiled: CompiledGraph,
@@ -364,7 +368,6 @@ type State = {
 	truncated: boolean,
 	stopped: boolean,
 	work: number,
-	seq: number,
 	heap: { Item },
 	invocations: { [string]: number },
 	colorCache: { [string]: Color3 },
@@ -386,12 +389,12 @@ local function spend(state: State): boolean
 	return true
 end
 
--- a before b: earlier time, or the later push at equal times (LIFO => depth-first among equal times).
+-- a before b: earlier time; at equal times the smaller tree path (depth-first, pin order). Paths are unique.
 local function before(a: Item, b: Item): boolean
 	if a.time ~= b.time then
 		return a.time < b.time
 	end
-	return a.seq > b.seq
+	return a.path < b.path
 end
 
 local function heapPush(heap: { Item }, item: Item)
@@ -436,8 +439,17 @@ local function heapPop(heap: { Item }): Item?
 	return top
 end
 
--- Queues the flow linked to `node.pin` at `time` (no-op when the output is not linked).
-local function fire(state: State, node: CompiledNode, pin: string, time: number, ctx: Context)
+-- Queues the flow linked to `node.pin` at `time` as child `branch` of the flow at `path` (no-op when the
+-- output is not linked).
+local function fire(
+	state: State,
+	node: CompiledNode,
+	pin: string,
+	time: number,
+	ctx: Context,
+	path: string,
+	branch: number
+)
 	local target = node.execOut[pin]
 	if target == nil or not spend(state) then
 		return
@@ -447,8 +459,7 @@ local function fire(state: State, node: CompiledNode, pin: string, time: number,
 		state.stopped = true
 		return
 	end
-	state.seq += 1
-	heapPush(state.heap, { time = time, seq = state.seq, node = target.node, ctx = ctx })
+	heapPush(state.heap, { time = time, path = path .. string.pack(">I2", branch), node = target.node, ctx = ctx })
 end
 
 local function nextInvocation(state: State, nodeId: string): number
@@ -810,7 +821,7 @@ local function runAction(state: State, item: Item, node: CompiledNode)
 				return
 			end
 		end
-		fire(state, node, "out", t, ctx)
+		fire(state, node, "out", t, ctx, item.path, 1)
 		return
 	end
 
@@ -828,7 +839,7 @@ local function runAction(state: State, item: Item, node: CompiledNode)
 				return
 			end
 		end
-		fire(state, node, "out", t, ctx)
+		fire(state, node, "out", t, ctx, item.path, 1)
 	elseif kind == "SetEnabled" then
 		if target then
 			local enabled = inputValue(state, ctx, node, "enabled")
@@ -840,7 +851,7 @@ local function runAction(state: State, item: Item, node: CompiledNode)
 				return
 			end
 		end
-		fire(state, node, "out", t, ctx)
+		fire(state, node, "out", t, ctx, item.path, 1)
 	elseif kind == "Tween" or kind == "SetProperty" then
 		local channel = node.params.channel
 		local duration = 0
@@ -865,16 +876,16 @@ local function runAction(state: State, item: Item, node: CompiledNode)
 			end
 		end
 		if kind == "Tween" then
-			fire(state, node, "done", t + duration, ctx)
+			fire(state, node, "done", t + duration, ctx, item.path, 2)
 		end
-		fire(state, node, "out", t, ctx)
+		fire(state, node, "out", t, ctx, item.path, 1)
 	elseif kind == "PlaySound" or kind == "Regenerate" then
 		if target then
 			if not addAction(state, node, t, { action = node.nodeType.action, componentId = target }) then
 				return
 			end
 		end
-		fire(state, node, "out", t, ctx)
+		fire(state, node, "out", t, ctx, item.path, 1)
 	end
 end
 
@@ -890,27 +901,27 @@ local function process(state: State, item: Item)
 		runAction(state, item, node)
 	elseif kind == "Delay" then
 		local seconds = sanitize(node, "seconds", inputValue(state, ctx, node, "seconds"))
-		fire(state, node, "out", t + seconds, ctx)
+		fire(state, node, "out", t + seconds, ctx, item.path, 1)
 	elseif kind == "Sequence" then
 		local interval = sanitize(node, "interval", inputValue(state, ctx, node, "interval"))
 		for i = node.count or 0, 1, -1 do
-			fire(state, node, "then" .. i, t + (i - 1) * interval, ctx)
+			fire(state, node, "then" .. i, t + (i - 1) * interval, ctx, item.path, i)
 		end
 	elseif kind == "Parallel" then
 		for i = node.count or 0, 1, -1 do
-			fire(state, node, "out" .. i, t, ctx)
+			fire(state, node, "out" .. i, t, ctx, item.path, i)
 		end
 	elseif kind == "Loop" then
 		local count = sanitize(node, "count", inputValue(state, ctx, node, "count"))
 		local interval = sanitize(node, "interval", inputValue(state, ctx, node, "interval"))
-		fire(state, node, "completed", t + count * interval, ctx)
+		fire(state, node, "completed", t + count * interval, ctx, item.path, count + 1)
 		if node.execOut.body then
 			for i = count - 1, 0, -1 do
 				if state.stopped then
 					break
 				end
 				local child: Context = { parent = ctx, loop = node.id, index = i, memo = {} }
-				fire(state, node, "body", t + i * interval, child)
+				fire(state, node, "body", t + i * interval, child, item.path, i + 1)
 			end
 		end
 	elseif kind == "RandomBranch" then
@@ -937,7 +948,7 @@ local function process(state: State, item: Item)
 					end
 				end
 			end
-			fire(state, node, "out" .. chosen, t, ctx)
+			fire(state, node, "out" .. chosen, t, ctx, item.path, chosen)
 		end
 	end
 end
@@ -1018,7 +1029,6 @@ function Runner.run(
 		truncated = false,
 		stopped = false,
 		work = 0,
-		seq = 0,
 		heap = {},
 		invocations = {},
 		colorCache = {},
@@ -1028,7 +1038,7 @@ function Runner.run(
 	for i = #roots, 1, -1 do
 		local node = compiled.nodes[roots[i]]
 		if node then
-			fire(state, node, "out", t0, rootCtx)
+			fire(state, node, "out", t0, rootCtx, string.pack(">I4", i), 1)
 		end
 	end
 	while not state.stopped do

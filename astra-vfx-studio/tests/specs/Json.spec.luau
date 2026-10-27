@@ -523,6 +523,19 @@ return function(T: any, use: (string) -> any, _ctx: any)
 					Json.encode({ ok200 })
 				end).toThrow("nesting deeper than 200 levels")
 			end)
+			T.it("counts Json.EMPTY_OBJECT as a container level, like decode does", function()
+				-- everything encode() accepts must decode again
+				local deep: any = EMPTY
+				for _ = 1, 199 do
+					deep = { deep }
+				end
+				local s = Json.encode(deep, { pretty = false })
+				T.expect(Json.decode(s)).toBe(true)
+				T.expect(function()
+					Json.encode({ deep })
+				end).toThrow("nesting deeper than 200 levels")
+				T.expect(Json.decode("[" .. s .. "]")).toBe(false)
+			end)
 			T.it("validates options", function()
 				T.expect(function()
 					Json.encode(1, 5 :: any)

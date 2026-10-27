@@ -1,5 +1,12 @@
 {
 	"name": "AstraVFXStudio",
+	"syncRules": [
+		{
+			"pattern": "*.vfx.json",
+			"use": "text",
+			"suffix": ".vfx.json"
+		}
+	],
 	"tree": {
 		"$className": "Folder",
 		"Plugin": {

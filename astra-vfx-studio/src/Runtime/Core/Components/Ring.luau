@@ -329,7 +329,10 @@ local descriptor: Types.ComponentDescriptor = {
 		local localCFrames: { CFrame } = {}
 		local sizes: { Vector3 } = {}
 		local geometryDirty = true
+		local geometryStamp = 0 -- bumps whenever the local geometry is recomputed
 		local world: CFrame? = nil
+		local placedWorld: CFrame? = nil
+		local placedStamp = -1
 
 		local writtenSize: { Vector3 } = {}
 		local writtenTransparency: number? = nil
@@ -340,6 +343,7 @@ local descriptor: Types.ComponentDescriptor = {
 				return
 			end
 			geometryDirty = false
+			geometryStamp += 1
 			local k = math.max(scale, 0)
 			computeGeometry(layout, radius * k, innerRadius * k, thickness * k, height * k, localCFrames, sizes)
 			for i, part in parts do
@@ -370,9 +374,11 @@ local descriptor: Types.ComponentDescriptor = {
 		-- Queues every part whose world CFrame changed (new transform or new geometry).
 		local function place(frame: FrameContext)
 			local w = world
-			if w == nil then
+			if w == nil or (w == placedWorld and geometryStamp == placedStamp) then
 				return
 			end
+			placedWorld = w
+			placedStamp = geometryStamp
 			for i in parts do
 				mover.move(frame, i, w * localCFrames[i])
 			end
@@ -387,6 +393,7 @@ local descriptor: Types.ComponentDescriptor = {
 			transparency = props.transparency
 			color = props.color
 			world = nil
+			placedWorld = nil
 			mover.forget()
 			geometryDirty = true
 			refreshGeometry()

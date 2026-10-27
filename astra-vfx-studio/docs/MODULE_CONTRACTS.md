@@ -372,5 +372,6 @@ Exporter.buildRuntimePackage(runtimeModule: ModuleScript, defs: { EffectDefiniti
 Exporter.buildStaticModel(def, options: { time: number?, quality: QualityLevel? }?) -> Model
 Generator.generate(prompt: string, options: { name: string?, seed: number? }?) -> (EffectDefinition, GeneratorReport)
 PresetLibrary.list() -> { PresetInfo } ; PresetLibrary.get(nameOrId) -> EffectDefinition?
+  -- presets are src/Presets/<Name>.vfx.json, synced by Rojo syncRules as StringValues (raw JSON text)
 Diagnostics.format(list: { Diagnostic }) -> string ; Diagnostics.summary(result: ValidationResult) -> string
 ```

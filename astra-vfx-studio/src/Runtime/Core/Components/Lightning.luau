@@ -430,6 +430,8 @@ local descriptor: Types.ComponentDescriptor = {
 		local color: Color3 = props.color
 		local localCFrame = CFrame.identity
 		local world: CFrame? = nil
+		local placedWorld: CFrame? = nil
+		local placedVersion = -1
 
 		-- Shape cache: recomputed when the seed bucket or the endpoints change.
 		local shapeBucket: number? = nil
@@ -510,6 +512,11 @@ local descriptor: Types.ComponentDescriptor = {
 			if not partMode or w == nil or frame == nil then
 				return
 			end
+			if w == placedWorld and geometryVersion == placedVersion then
+				return
+			end
+			placedWorld = w
+			placedVersion = geometryVersion
 			for i in parts do
 				mover.move(frame, i, w * segmentCFrames[i])
 			end
@@ -588,6 +595,7 @@ local descriptor: Types.ComponentDescriptor = {
 			color = props.color
 			localCFrame = CFrame.identity
 			world = nil
+			placedWorld = nil
 			mover.forget()
 			ensureShape()
 			refresh()
@@ -645,11 +653,11 @@ local descriptor: Types.ComponentDescriptor = {
 			if not alive then
 				return
 			end
-			localCFrame = newLocalCFrame
 			world = worldCFrame
 			if partMode then
 				place(frame)
-			else
+			elseif newLocalCFrame ~= localCFrame then
+				localCFrame = newLocalCFrame
 				refreshAttachments()
 			end
 		end
