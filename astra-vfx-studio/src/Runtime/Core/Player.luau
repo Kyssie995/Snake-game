@@ -15,6 +15,7 @@
 	  player:seek(t)             deterministic state at t without emission (scrubbing)
 	  player:pause() / resume() / stop(fade?) / destroy() / setTimeScale(n) / setCFrame(cf) / setLoop(b)
 	  player:fire(name)          runtime graph trigger OnEvent(name) at the current time
+	  player:isLooping()         extension: the current loop flag (options.loop / setLoop / the definition)
 	  player.time, player.state (Types.PlayerState), player.cycle, player.compiled, player.built
 	  player.finished: Signal(reason: "finished" | "destroyed")   fired once when the player ends
 	  player.event: Signal(name)                                   marker / component / graph "fire" events
@@ -67,8 +68,9 @@
 	     CFrame). WorldRoot = the container's WorldRoot ancestor when it is not a Workspace (a WorldModel in
 	     viewport mode), else Env.getService("Workspace"); without either the CFrames are assigned directly.
 	  6. End (no loop): once time >= duration, the player waits for the tail and then finishes. Tail and stop
-	     linger are REAL seconds (particles and trails age in real time; emitters run at min(1, compiled
-	     timeScale)): tail = compiled.maxTail / clamp(compiled.timeScale, 0.1, 1).
+	     linger are REAL seconds (particles and trails age in real time; emitters run at most at the effective
+	     rate, see "Time scale"): tail = compiled.maxTail / clamp(rate, 0.1, 1), rate = timeScale ×
+	     compiled.timeScale, recomputed by setTimeScale (stop() takes the value at the time of the call).
 	     Finish: state "finished", the copy goes to options.release (or is destroyed), finished:Fire("finished").
 
 	Start: start() poses everything at t = 0 — the root and the transform of every component (BulkMoveTo) —
@@ -77,22 +79,34 @@
 	the components and runs the actions at t = 0. (Core/Scheduler additionally steps a player first in the frame
 	after the one it was added in.)
 
-	Pause: time, tracks, schedule and procedural motion freeze; the root still follows the attach target. Engine
-	particles keep simulating (there is no generic pause hook), and activation does not change while paused.
-	setTimeScale / options.timeScale scale the effect clock only: ParticleEmitter.TimeScale follows the
-	definition's timeScale (set at build time by the descriptor), so engine particles do not slow down with it.
+	Pause: time, tracks, schedule and procedural motion freeze; the root still follows the attach target, and
+	activation does not change while paused. Engine clocks are frozen through the time scale hook (below):
+	particles stop simulating (ParticleEmitter.TimeScale 0), beam textures stop scrolling; continuous emission is
+	not switched off (at TimeScale 0 the engine emits nothing new either — ASSUMPTION, see U2).
+
+	Time scale: the effective scale is rate = options.timeScale / setTimeScale × compiled.timeScale while playing
+	or stopping, and 0 while paused. Every controller that implements the optional setTimeScale(scale)
+	(Types.ComponentInstance: particles, beam, lightning in beam render) gets it in start(), on pause() /
+	resume() / setTimeScale() / stop() when the value changes (never per frame; stopping a paused copy thaws it so
+	its live particles can finish), and after seek() (which resets the copy to its build state, the definition's
+	timeScale). So ParticleEmitter.TimeScale = clamp(authored × rate, 0, 1)
+	(the engine range ends at 1: slow motion works, fast motion cannot speed particles up) and Beam.TextureSpeed
+	= authored × rate. Trails have no time factor (they age in real time) and sounds keep their PlaybackSpeed.
+
 	stop(fade?): every controller is release()d (no new emission, live particles finish), no more actions run, the
-	time keeps advancing for transforms, and the player finishes after `fade` real seconds (default: the tail;
-	0 = now). destroy(): immediate; the copy goes to options.release or is destroyed; idempotent. Signals are
-	disconnected once the copy is gone.
+	time keeps advancing for transforms, and the player finishes after `fade` real seconds (default: the tail at
+	the current rate, step 6; 0 = now). destroy(): immediate; the copy goes to options.release or is destroyed;
+	idempotent. Signals are disconnected once the copy is gone.
 
 	seek(t): t clamped to [0, duration]. Every controller is reset() (authored state, particles cleared — the
 	engine cannot fast-forward particles), overrides / runtime actions / SetEnabled states are cleared, then the
 	scheduled actions with time < t are replayed for their state only — tween/set overrides, enable/disable,
 	clear, regenerate, stop; never emit, play or fire — and the state at t is evaluated with frame.seeking = true
 	(no bursts, no sounds). The result depends only on (t, cycle), so seeking twice to the same time from any state
-	gives identical instances. Actions AT t run with the next step. seek() in state "idle" or "finished" (with
-	autoRelease = false) leaves the player "paused"; it is ignored while stopping or after the copy is gone.
+	gives identical instances — except the engine clock values (ParticleEmitter.TimeScale, Beam.TextureSpeed),
+	which follow the play state ("Time scale": 0 while paused). Actions AT t run with the next step. seek() in
+	state "idle" or "finished" (with autoRelease = false) leaves the player "paused"; it is ignored while stopping
+	or after the copy is gone.
 
 	fire(name): Graph.run(compiled.graph, { kind = "event", id = name }, time, compiled.seed, cycle, compiled);
 	the actions join the runtime queue (only while playing or paused). seek() and stop() drop the queue.
@@ -191,6 +205,7 @@ type PlayerData = {
 	_epoch: number,
 	_timeScale: number,
 	_rate: number,
+	_appliedScale: number?, -- last value passed to the controllers' setTimeScale (nil = not yet / after reset)
 	_loop: boolean,
 	_base: CFrame,
 	_attach: Instance?,
@@ -225,6 +240,11 @@ Player.MAX_WRAPS = MAX_WRAPS
 
 local function isFinite(x: any): boolean
 	return type(x) == "number" and x == x and x ~= INF and x ~= -INF
+end
+
+-- Real seconds the visuals outlive the end at `rate` (header step 6).
+local function tailLimit(maxTail: number, rate: number): number
+	return maxTail / math.clamp(rate, TAIL_MIN_RATE, 1)
 end
 
 local function describe(v: any): string
@@ -475,6 +495,7 @@ function Player.new(compiled: CompiledEffect, built: BuiltEffect, options: Playe
 		_epoch = 0,
 		_timeScale = timeScale,
 		_rate = timeScale * effectRate,
+		_appliedScale = nil,
 		_loop = if o.loop == nil then compiled.loop == true else o.loop,
 		_base = o.cframe or IDENTITY,
 		_attach = o.attach,
@@ -485,7 +506,7 @@ function Player.new(compiled: CompiledEffect, built: BuiltEffect, options: Playe
 		_autoRelease = o.autoRelease ~= false,
 		_disposed = false,
 		_tail = nil,
-		_tailLimit = compiled.maxTail / math.clamp(effectRate, TAIL_MIN_RATE, 1),
+		_tailLimit = tailLimit(compiled.maxTail, timeScale * effectRate),
 		_stopElapsed = 0,
 		_stopLinger = 0,
 		_moves = 0,
@@ -933,6 +954,27 @@ function Player._wrap(self: Player, frame: FrameContext)
 	self._includeStart = true
 end
 
+-- Passes the effective time scale (0 while paused) to every controller with setTimeScale (header "Time scale").
+-- Only when it changed, unless `force` (after reset() put the copy back to its build state).
+function Player._syncTimeScale(self: Player, force: boolean?)
+	local state = self.state
+	if self._disposed or state == "destroyed" or state == "idle" or state == "finished" then
+		return
+	end
+	local scale = if state == "paused" then 0 else self._rate
+	if not force and scale == self._appliedScale then
+		return
+	end
+	self._appliedScale = scale
+	for _, plan in self._plans do
+		local controller = plan.controller
+		local setTimeScale = controller.setTimeScale
+		if setTimeScale then
+			setTimeScale(controller, scale)
+		end
+	end
+end
+
 -- Ends the player normally (header step 6).
 function Player._finish(self: Player)
 	if self.state == "finished" or self.state == "destroyed" then
@@ -992,6 +1034,7 @@ function Player.start(self: Player)
 	self.state = "playing"
 	self.time = 0
 	self._includeStart = true
+	self:_syncTimeScale(true)
 	local frame = self:_beginFrame(false)
 	self:_evaluate("pose", frame)
 	self:_flush()
@@ -1138,12 +1181,14 @@ function Player.seek(self: Player, t: number)
 	if state == "idle" or state == "finished" then
 		self.state = "paused"
 	end
+	self:_syncTimeScale(true) -- reset() restored the build-time scale
 end
 
 -- Freezes the effect time (state "paused").
 function Player.pause(self: Player)
 	if self.state == "playing" then
 		self.state = "paused"
+		self:_syncTimeScale()
 	end
 end
 
@@ -1151,6 +1196,7 @@ end
 function Player.resume(self: Player)
 	if self.state == "paused" then
 		self.state = "playing"
+		self:_syncTimeScale()
 	elseif self.state == "idle" then
 		self:start()
 	end
@@ -1182,6 +1228,8 @@ function Player.stop(self: Player, fade: number?)
 	self._stopLinger = if fade ~= nil then fade else self._tailLimit
 	if self._stopLinger <= 0 then
 		self:_finish()
+	else
+		self:_syncTimeScale() -- a paused copy thaws, so its live particles can finish
 	end
 end
 
@@ -1201,13 +1249,16 @@ function Player.destroy(self: Player)
 	self:_disconnect()
 end
 
--- Multiplier on top of the definition's timeScale (0 freezes; clamped to Constants.MAX_TIME_SCALE).
+-- Multiplier on top of the definition's timeScale (0 freezes; clamped to Constants.MAX_TIME_SCALE). Reaches the
+-- engine clocks of the copy too (header "Time scale") and the tail length (header step 6).
 function Player.setTimeScale(self: Player, n: number)
 	if not isFinite(n) or n < 0 then
 		error("Player.setTimeScale: expected a finite number >= 0, got " .. describe(n), 2)
 	end
 	self._timeScale = math.min(n, MAX_TIME_SCALE)
 	self._rate = self._timeScale * self.compiled.timeScale
+	self._tailLimit = tailLimit(self.compiled.maxTail, self._rate)
+	self:_syncTimeScale()
 end
 
 -- Moves the effect origin to a fixed CFrame (stops following an attach target; the offset still applies).
@@ -1224,6 +1275,11 @@ function Player.setLoop(self: Player, loop: boolean)
 		error("Player.setLoop: expected a boolean, got " .. describe(loop), 2)
 	end
 	self._loop = loop
+end
+
+-- True while the effect loops (options.loop / setLoop, else the definition's loop).
+function Player.isLooping(self: Player): boolean
+	return self._loop
 end
 
 -- Runtime graph trigger OnEvent(name) at the current effect time.

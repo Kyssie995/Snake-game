@@ -162,15 +162,26 @@ Scheduler: genau EINE RunService-Verbindung für alle aktiven Player, wird bei L
 
 ### 5.2 Player-Frame (`Player:step(dt)`)
 
-1. Zeit fortschreiben (`dt × timeScale`), Loop-Umbruch behandeln (Zeitplan pro Durchlauf neu, Seed + Durchlauf).
+1. Zeit fortschreiben (`dt × timeScale`), Loop-Umbruch behandeln: Erreicht die Zeit `duration`, wird der Effekt
+   zuerst bei `duration` ausgewertet (wie das letzte Frame eines One-Shot-Effekts: endende Spannen deaktivieren, eine
+   Spanne innerhalb des Frames wird noch einmal aktiviert, damit ihr Burst nicht verloren geht), die restlichen
+   Aktionen (t_prev, duration] laufen, dann `cycle + 1`, Zeitplan des neuen Durchlaufs
+   (`Compiler.scheduleForCycle`, Graph-Zufallswerte hängen von Seed + Durchlauf ab), Zeit-Umbruch und Rücksetzen
+   des Durchlaufzustands (aktive Komponenten werden deaktiviert und aktivieren neu, Overrides und SetEnabled-Zustände
+   werden gelöscht).
 2. Wurzel-CFrame bestimmen (`Attach`-Ziel × `Offset` oder fester `CFrame`).
 3. Für jede Komponente in topologischer Reihenfolge: aktiv? → `setActive` bei Wechsel; Kanäle auswerten
    (`Curves.evaluate`) → `apply`; Transformation aus Ruhelage × Kanälen × Spin × Eltern berechnen → `setTransform`
    (Parts sammeln für ein einziges `WorldRoot:BulkMoveTo`); prozedurales `update`.
 4. Fällige Aktionen aus dem Zeitplan im Intervall (t_prev, t] ausführen (`emit`, `enable`, `fire`, Graph-Aktionen …).
 5. Gesammelte Part-CFrames per `BulkMoveTo` anwenden.
-6. Ende: Emitter stoppen, Nachlaufzeit (`maxTail` = längste Partikel-/Trail-Lebensdauer) abwarten, dann aufräumen
-   bzw. an den Pool zurückgeben.
+6. Ende: Emitter stoppen, Nachlaufzeit abwarten, dann aufräumen bzw. an den Pool zurückgeben. Die Nachlaufzeit
+   ist in Echtzeit: `maxTail` (längste Partikel-/Trail-Lebensdauer) / clamp(Rate, 0.1, 1) – Partikel altern höchstens
+   mit der effektiven Rate (siehe Zeitfaktor unten).
+
+Benutzer-Callbacks (`OnEvent`, Handler von `Finished`/`Event`/`actionExecuted`) startet der Player mit
+`task.spawn`: sofort und in Reihenfolge, aber ein Handler, der yieldet (`task.wait`, `WaitForChild` …), hält nur
+seinen eigenen Thread an – nie das Scheduler-Frame und damit alle anderen Effekte.
 
 `Player:seek(t)` wertet denselben Zustand ohne Emission aus (Scrubbing). Partikel werden dabei geleert, weil die
 Engine keine Partikelsimulation „vorspulen“ kann: `ParticleEmitter.FastForward` ist RobloxScriptSecurity,
@@ -179,7 +190,16 @@ Engine keine Partikelsimulation „vorspulen“ kann: `ParticleEmitter.FastForwa
 Weitere Engine-Fakten, die der Player berücksichtigt: Aktionen werden nie im selben Frame ausgeführt, in dem die
 Instanzen gebaut wurden (ein `Emit` direkt nach dem Parenten kann wirkungslos sein – berichtet); `Color`/`Size`/
 `Transparency` eines Emitters wirken auf alle lebenden Partikel, `Rate`/`Speed`/`Lifetime` nur auf neue; Beams und
-Trails haben keinen Zeitfaktor (Slow-Motion skaliert `TextureSpeed`, Trails altern in Echtzeit).
+Trails haben keinen Zeitfaktor (Trails altern in Echtzeit).
+
+**Zeitfaktor.** Die effektive Rate = `timeScale` der Definition × Play-Option `TimeScale` × `handle:SetTimeScale`,
+beim Pausieren 0. Sie treibt die Effektuhr und erreicht die Engine-Uhren der Kopie über die optionale
+Controller-Methode `setTimeScale(rate)`: `ParticleEmitter.TimeScale = clamp(timeScale × Rate, 0, 1)` (die Engine
+erlaubt nur 0..1 – Zeitlupe und Pause funktionieren, schneller als normal laufen Partikel nie), `Beam.TextureSpeed =
+textureSpeed × Rate` (auch Blitz-Beams). Der Player ruft sie bei `start()`, `pause()`/`resume()`/`setTimeScale()`/
+`stop()` (nur bei Änderung, nie pro Frame) und nach `seek()` auf. Pause friert damit lebende Partikel und
+Textur-Scrolling ein (TimeScale 0 ist dokumentiert; Studio-Bugs berichtet, Constraints PE-B1/U2). Trails und Sounds
+bleiben unbeeinflusst.
 
 ### 5.3 Öffentliche API (`require(ReplicatedStorage.AstraVFX)`)
 
@@ -197,12 +217,23 @@ local handle = AstraVFX.Play("VioletImpact", {
 })
 handle:Stop()            -- sanft: Emission stoppen, Partikel ausklingen lassen, dann aufräumen
 handle:Destroy()         -- sofort entfernen
-handle:Pause() / handle:Resume() / handle:SetTimeScale(n) / handle:SetCFrame(cf)
+handle:Pause() / handle:Resume() / handle:SetTimeScale(n) / handle:SetCFrame(cf)   -- auch Partikel/Beam-Uhren
 handle:Fire("Detonate")  -- löst Graph-Trigger "OnEvent(Detonate)" aus
 handle.Finished:Connect(fn); handle.Event:Connect(function(name) end)
 AstraVFX.Preload("VioletImpact", { Count = 2, Quality = "Medium" })  -- Pool vorwärmen
 AstraVFX.SetQuality("Auto"); AstraVFX.StopAll(); AstraVFX.ActiveCount()
+AstraVFX.SetMaxActive(64)  -- globale Obergrenze aktiver Effekte (Standard 64, math.huge = unbegrenzt)
+local h, err = AstraVFX.TryPlay("Aura")  -- (nil, "limit"), wenn die Obergrenze voll mit Loop-Effekten ist
 ```
+
+**Obergrenze aktiver Effekte.** Ein Effekt zählt, solange er spielt oder pausiert ist (nicht mehr, sobald er
+ausklingt, endet oder zerstört ist; `ActiveCount()` zählt ausklingende mit). Würde ein `Play` die Grenze n
+überschreiten, wird der **älteste nicht loopende** Effekt sanft gestoppt (`Stop()`; so viele wie nötig, normalerweise
+einer) und der neue spielt. Füllen Loop-Effekte allein die Grenze, wird nichts gestoppt und der neue Play abgelehnt:
+`warn()`, `Play` liefert `nil`, `TryPlay` liefert `nil, "limit"`. Eine gesenkte Grenze wirkt erst beim nächsten
+`Play`. Gestoppt wird erst, wenn die neue Kopie gebaut ist – ein unterwegs scheiterndes `Play` stoppt nichts.
+Kompilierte Varianten werden gecacht (höchstens 64); eine Kopie, deren Container von außen entfernt wurde
+(geleerter Ordner, zerstörter Charakter), wird zerstört statt in den Pool gelegt.
 
 **Netzwerk (`AstraVFX.Net`):** Gameplay bleibt serverseitig autoritativ; Effekte sind kosmetisch und werden auf
 Clients gerendert. Der Server ruft `Net.PlayAll/PlayFor/PlayNear(name, options)` auf; Clients (`Net.Listen()`)
@@ -221,8 +252,14 @@ validieren Name (nur registrierte Effekte), klemmen Skalierung/Zeitfaktor und sp
 `count`-Eigenschaften (Rate, Burst-Anzahl, Trümmeranzahl) werden mit `countScale` multipliziert, `segments` mit
 `segmentScale` (nur prozedurale Segmente wie Ring-, Blitz- und Schockwellen-Unterteilungen – **nicht**
 `Beam.Segments`: die Engine reduziert Beam-Segmente bei niedriger Grafikqualität selbst, und Farbverläufe brauchen
-mindestens n−1 Segmente, siehe Constraints K14). Weniger, dafür etwas größere Partikel (`sizeCompensation`) halten die Silhouette. Komponenten mit
-`minQuality` werden unterhalb dieser Stufe weggelassen; `qualityOverrides` erlaubt gezielte Werte pro Stufe.
+mindestens n−1 Segmente, siehe Constraints K14). Dieselbe Zählregel gilt für Keyframes eines `rate`-Kanals,
+`emit`-Events und Graph-Werte (`Emit`-Anzahl, Tween/SetProperty auf `rate`), damit alles im selben kompilierten
+Wertebereich liegt. Weniger, dafür etwas größere Partikel (`sizeCompensation`) halten die Silhouette. Komponenten
+mit `minQuality` werden unterhalb dieser Stufe weggelassen; `qualityOverrides` erlaubt gezielte Werte pro Stufe.
+`maxLights` zählt in Komponentenreihenfolge **alle** Lichter laut `estimateCost(...).lights`: `light`-Komponenten
+und die eingebauten PointLights von `sphere`/`flash`. Passt ein Licht nicht mehr, baut der Compiler `sphere`/`flash`
+ohne Licht (`light = false`) und lässt `light`-Komponenten samt Kindern weg (harte Grenze, auch gegen
+`qualityOverrides`).
 `"Auto"` liest auf Clients die Grafikqualität des Spielers (siehe Constraints-Dokument); Server und Studio
 verwenden Medium bzw. die Editor-Einstellung.
 
@@ -241,6 +278,10 @@ Threads zu starten (kein `task.wait`, keine unbegrenzten Schleifen):
 * Ausführung: `OnPlay`/`OnMarker`-Flüsse werden beim Kompilieren in den statischen Zeitplan entrollt (mit Seed ⇒
   deterministisch, Scrubbing-fähig, in der Timeline als Spur sichtbar). `OnEvent`-Flüsse werden zur Laufzeit beim
   Auslösen ab der aktuellen Zeit entrollt. Harte Grenze: 10 000 erzeugte Aktionen pro Auslösung.
+* `SetEnabled` wirkt auf jeden Komponententyp: Typen mit `enable`/`disable`-Events (Partikel, Beam, Trail, Licht)
+  schalten Emission/Sichtbarkeit, alle anderen schaltet der Player über ihre Aktivierung aus und wieder ein. Nur bei
+  `group` warnt die Validierung (`graph.action_unsupported`): eine Gruppe hat nichts Sichtbares, ihre Kinder schaltet
+  SetEnabled nicht mit.
 
 ## 7. Studio-Plugin (src/Plugin)
 

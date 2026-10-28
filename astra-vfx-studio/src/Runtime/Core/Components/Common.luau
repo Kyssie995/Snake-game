@@ -274,6 +274,7 @@ function Common.controller(component: CompiledComponent, instances: { Instance }
 		end,
 		onAction = function(_self: ComponentInstance, _action: Types.ScheduledAction, _frame: FrameContext) end,
 		update = nil,
+		setTimeScale = nil,
 		release = function(_self: ComponentInstance) end,
 		reset = function(_self: ComponentInstance) end,
 		destroy = function(self: ComponentInstance)

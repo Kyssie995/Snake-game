@@ -1,0 +1,106 @@
+{
+	"name": "AstraVFX-Examples",
+	"syncRules": [
+		{
+			"pattern": "*.vfx.json",
+			"use": "text",
+			"suffix": ".vfx.json"
+		}
+	],
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"$className": "ReplicatedStorage",
+			"AstraVFX": {
+				"$path": "../src/Runtime",
+				"Effects": {
+					"$className": "Folder",
+					"FireExplosion": {
+						"$path": "Effects/FireExplosion.vfx.json"
+					},
+					"VioletImpact": {
+						"$path": "../effects/VioletImpact.vfx.json"
+					}
+				}
+			}
+		},
+		"ServerScriptService": {
+			"$className": "ServerScriptService",
+			"AstraVFXDemo": {
+				"$path": "ServerScriptService/AstraVFXDemo.server.luau"
+			}
+		},
+		"StarterPlayer": {
+			"$className": "StarterPlayer",
+			"StarterPlayerScripts": {
+				"$className": "StarterPlayerScripts",
+				"AstraVFXClient": {
+					"$path": "StarterPlayerScripts/AstraVFXClient.client.luau"
+				}
+			}
+		},
+		"Workspace": {
+			"$className": "Workspace",
+			"Baseplate": {
+				"$className": "Part",
+				"$properties": {
+					"Anchored": true,
+					"Locked": true,
+					"Size": [512, 4, 512],
+					"CFrame": {
+						"CFrame": {
+							"position": [0, -2, 0],
+							"orientation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+						}
+					},
+					"Color": [0.39, 0.37, 0.38],
+					"Material": "Slate",
+					"TopSurface": "Smooth",
+					"BottomSurface": "Smooth"
+				}
+			},
+			"VFXTarget": {
+				"$className": "Part",
+				"$properties": {
+					"Anchored": true,
+					"CanCollide": false,
+					"Transparency": 0.5,
+					"Size": [1, 1, 1],
+					"CFrame": {
+						"CFrame": {
+							"position": [0, 4, -24],
+							"orientation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+						}
+					},
+					"Color": [0.55, 0.42, 1],
+					"Material": "Neon",
+					"TopSurface": "Smooth",
+					"BottomSurface": "Smooth"
+				}
+			},
+			"SpawnLocation": {
+				"$className": "SpawnLocation",
+				"$properties": {
+					"Anchored": true,
+					"Size": [6, 1, 6],
+					"CFrame": {
+						"CFrame": {
+							"position": [0, 0.5, 0],
+							"orientation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+						}
+					},
+					"Duration": 0,
+					"TopSurface": "Smooth",
+					"BottomSurface": "Smooth"
+				}
+			}
+		},
+		"Lighting": {
+			"$className": "Lighting",
+			"$properties": {
+				"ClockTime": 20,
+				"Brightness": 1
+			}
+		}
+	}
+}

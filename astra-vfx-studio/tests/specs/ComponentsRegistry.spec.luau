@@ -1572,10 +1572,34 @@ return function(T: any, use: (string) -> any, ctx: any)
 					c:onAction(eventAction(event, i, 0.4), frameAt(h, 0.4))
 				end
 				step(h, c, 0.8, CFrame.new(-3, 1, 0))
+				if c.setTimeScale then
+					c:setTimeScale(0.37)
+				end
 				c:release()
 				c:reset()
 				expect(snapshot(h, component.id, skip)).toBe(built)
 			end)
+
+			T.it(
+				"setTimeScale, where implemented, changes nothing at the build scale and ignores bad values",
+				function()
+					local h = harness()
+					local c, component = h:build(typeName)
+					if c.setTimeScale == nil then
+						return
+					end
+					local before = snapshot(h, component.id)
+					c:setTimeScale(1) -- the harness effect's timeScale
+					for _, bad in { -1, 0 / 0, math.huge, -math.huge, "fast" :: any } do
+						c:setTimeScale(bad)
+					end
+					expect(snapshot(h, component.id)).toBe(before)
+					c:setTimeScale(0.5)
+					expect(snapshot(h, component.id)).never.toBe(before)
+					c:setTimeScale(1)
+					expect(snapshot(h, component.id)).toBe(before)
+				end
+			)
 
 			T.it("is deterministic: the state at t = 0.7 does not depend on the frame history", function()
 				local function run(history: { { any } }, seed: number): string

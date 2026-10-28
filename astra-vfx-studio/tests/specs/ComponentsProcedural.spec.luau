@@ -1956,6 +1956,41 @@ return function(T: any, use: (string) -> any, ctx: any)
 			end
 		end)
 
+		T.it("scrolls beam textures at the engine default speed × the effect time scale (setTimeScale)", function()
+			local h = harness()
+			local c, component = h:build("lightning", { texture = "rbxasset://textures/particles/sparkles_main.dds" })
+			local beams = beamsOf(h, component.id)
+			for _, b in beams do
+				expect(b.TextureSpeed).toBe(1) -- harness effect timeScale 1
+			end
+			expect(type(c.setTimeScale)).toBe("function")
+			c:setTimeScale(0.25)
+			for _, b in beams do
+				expect(b.TextureSpeed).toBe(0.25)
+			end
+			c:setTimeScale(0) -- paused
+			for _, b in beams do
+				expect(b.TextureSpeed).toBe(0)
+			end
+			c:reset()
+			for _, b in beams do
+				expect(b.TextureSpeed).toBe(1)
+			end
+			-- built with a slow definition: the build state already follows it
+			local h2 = harness()
+			local component2 = h2:compile("lightning")
+			local ctx2 = h2:context({ [component2.id] = component2 })
+			ctx2.effect.timeScale = 0.5
+			local slow = descriptorOf("lightning").build(ctx2, component2)
+			table.insert(h2.controllers, slow)
+			for _, b in beamsOf(h2, component2.id) do
+				expect(b.TextureSpeed).toBe(0.5)
+			end
+			-- part render has no texture to scroll
+			local parts = harness():build("lightning", { render = "part" })
+			expect(parts.setTimeScale).toBeNil()
+		end)
+
 		T.it("keeps the endpoints exact and the zig-zag inside the sin(π·u) envelope", function()
 			for _, seed in { 1, 2, 3, 99 } do
 				local h = harness()

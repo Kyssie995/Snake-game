@@ -6,12 +6,14 @@
 	  AstraVFX.Register(source) -> string | { string }   definition table, JSON text, ModuleScript returning one
 	                                                     of those, StringValue with JSON text, or a Folder of them
 	  AstraVFX.Unregister(name) -> boolean ; AstraVFX.IsRegistered(name) -> boolean ; AstraVFX.GetNames() -> { string }
-	  AstraVFX.Play(name, options?) -> Handle            errors on unknown names / bad options
-	  AstraVFX.TryPlay(name, options?) -> (Handle?, string?)
+	  AstraVFX.Play(name, options?) -> Handle?           errors on unknown names / bad options; nil (with a
+	                                                     warning) when the active-effect cap refuses the play
+	  AstraVFX.TryPlay(name, options?) -> (Handle?, string?)   (nil, "limit") when the cap refuses the play
 	  AstraVFX.Preload(name, options?) -> number         warms the pool (options: Count = 1, Quality, Scale, Seed,
 	                                                     Palette)
 	  AstraVFX.SetQuality(level) / GetQuality()          default quality of Play ("Auto" = Quality.detect() per Play)
 	  AstraVFX.StopAll(immediate?) ; AstraVFX.ActiveCount() -> number
+	  AstraVFX.SetMaxActive(n) / GetMaxActive()          global cap on active effects (default 64, see below)
 	  AstraVFX.SetUpdateEvent("Heartbeat" | "PreRender")   Core/Scheduler event (PreRender only on clients)
 	  AstraVFX.Validate(definitionOrJson) -> (ValidationResult, EffectDefinition?)   migrate + validate, no register
 	  AstraVFX.Version                                   Constants.VERSION
@@ -45,16 +47,30 @@
 	  OnEvent               (name) -> () for marker / component / graph "fire" events
 	  Autoplay              default true; false = built and posed at t = 0 but paused until handle:Resume()
 
-	Play never yields: lookup (incl. lazy registration) -> compile (cached by Compiler.key with the content hash
-	computed once per registration; at most 64 cached variants, the oldest is dropped together with its pooled
-	copies) -> a pooled copy (Core/Pool, key = cache key) or Builder.build -> Player.new + start ->
-	Scheduler.add. The copy goes back to the pool when the effect ends (finish, Stop, Destroy) as long as its cache
-	entry still exists and its container is still parented (a container removed from the outside — cleared
-	folder, destroyed parent — is never pooled); otherwise it is destroyed.
+	Play never yields: lookup (incl. lazy registration) -> active-effect cap -> compile (cached by Compiler.key
+	with the content hash computed once per registration; at most 64 cached variants, the oldest is dropped
+	together with its pooled copies) -> a pooled copy (Core/Pool, key = cache key) or Builder.build -> Player.new +
+	start -> Scheduler.add. The copy goes back to the pool when the effect ends (finish, Stop, Destroy) as long as
+	its cache entry still exists and its container is still parented (a container removed from the outside —
+	cleared folder, destroyed parent — is never pooled); otherwise it is destroyed.
+
+	Active-effect cap (SetMaxActive(n): a whole number >= 1, or math.huge = unlimited; default 64): an effect
+	counts while it is playing or paused (started through Play and not stopping / finished / destroyed —
+	ActiveCount() also includes the stopping ones that linger for their tail). When a Play would make more than
+	n effects count, the oldest counting effects that do not loop (Player:isLooping(), i.e. Loop / SetLoop / the
+	definition) are stopped gracefully with Stop() — as many as needed, normally one — and the new effect plays.
+	When the looping effects alone fill the cap, nothing is stopped and the new Play is refused: warn(), Play
+	returns nil, TryPlay returns (nil, "limit"). Lowering the cap does not touch running effects; it applies to
+	the next Play. Unknown names and bad options are still checked first (they raise as before). The cap decides
+	before anything is compiled or built (a refused Play builds nothing), but the old effects are stopped only once
+	the new copy and its player exist, so a Play that fails on the way (TryPlay: compile / build error, e.g. an
+	invalid Palette colour) stops nothing.
 
 	Handle: Stop(fade?), Destroy(), Pause(), Resume(), SetTimeScale(n), SetCFrame(cf), SetLoop(b), Seek(t),
 	Fire(name), GetTime(), GetState(), IsPlaying() (true until stopped / finished / destroyed, also while paused),
 	Finished (Signal, fires once with "finished" | "destroyed"), Event (Signal(name)), Name, Id.
+	SetTimeScale and Pause / Resume reach the engine clocks of the copy too (ParticleEmitter.TimeScale,
+	Beam.TextureSpeed; Core/Player "Time scale").
 ]]
 
 local Builder = require(script.Core.Builder)
@@ -99,6 +115,10 @@ AstraVFX.Net = Net
 local MAX_CACHE = 64
 local MAX_SUMMARY_LINES = 12
 local INF = math.huge
+local DEFAULT_MAX_ACTIVE = 64
+local LIMIT = "limit" -- TryPlay's message when the active-effect cap refuses a play
+
+AstraVFX.DEFAULT_MAX_ACTIVE = DEFAULT_MAX_ACTIVE
 
 local registry: { [string]: Entry } = {} -- by id
 local aliases: { [string]: string } = {} -- name / instance name -> id
@@ -106,7 +126,9 @@ local seenSources: { [Instance]: boolean } = {}
 local cache: { [string]: CacheEntry } = {}
 local cacheOrder: { string } = {}
 local defaultQuality: QualityLevel | "Auto" = "Auto"
-local live: { [any]: boolean } = {} -- handles
+local live: { [any]: number } = {} -- handle -> start serial (Play order, for the active-effect cap)
+local serial = 0
+local maxActive = DEFAULT_MAX_ACTIVE
 
 local function isFinite(x: any): boolean
 	return type(x) == "number" and x == x and x ~= INF and x ~= -INF
@@ -581,11 +603,55 @@ local function stillParented(built: BuiltEffect): boolean
 	return ok and parent ~= nil
 end
 
-local function play(name: any, options: any): Handle
+local NO_EVICTIONS: { Handle } = table.freeze({})
+
+-- Plans room for one more effect under the cap (see the header): the effects to stop once the new copy is ready,
+-- or nil when the play is refused. Stops nothing itself, so a play that fails later has no side effects.
+local function planRoom(): { Handle }?
+	if maxActive == INF then
+		return NO_EVICTIONS
+	end
+	local counted = 0
+	local candidates: { Handle } = {}
+	for handle in live do
+		local player = handle._player
+		local state = player.state
+		if state == "playing" or state == "paused" or state == "idle" then
+			counted += 1
+			if not player:isLooping() then
+				table.insert(candidates, handle)
+			end
+		end
+	end
+	local needed = counted + 1 - maxActive
+	if needed <= 0 then
+		return NO_EVICTIONS
+	end
+	if #candidates < needed then
+		return nil
+	end
+	table.sort(candidates, function(a: Handle, b: Handle): boolean
+		return live[a] < live[b]
+	end)
+	return table.move(candidates, 1, needed, 1, {})
+end
+
+local function play(name: any, options: any): (Handle?, string?)
 	local o = checkPlayOptions("Play", options)
 	local entry = lookup(name)
 	if entry == nil then
 		error("AstraVFX.Play: unknown effect " .. describe(name), 0)
+	end
+	local evictions = planRoom()
+	if evictions == nil then
+		warn(
+			"[AstraVFX] Play "
+				.. string.format("%q", entry.name)
+				.. " refused: the limit of "
+				.. tostring(maxActive)
+				.. " active effects (AstraVFX.SetMaxActive) is filled by looping effects; stop one or raise the limit"
+		)
+		return nil, LIMIT
 	end
 	local v = variant(entry, o)
 	local key = v.key
@@ -627,7 +693,12 @@ local function play(name: any, options: any): Handle
 		Event = player.event,
 		_player = player,
 	}, Handle)
-	live[handle] = true
+	-- The new copy is ready: now make room under the cap (the oldest non-looping effects end gracefully).
+	for _, old in evictions do
+		old:Stop()
+	end
+	serial += 1
+	live[handle] = serial
 	player.finished:Connect(function()
 		live[handle] = nil
 		Scheduler.remove(player)
@@ -637,19 +708,21 @@ local function play(name: any, options: any): Handle
 		player:pause()
 	end
 	Scheduler.add(player)
+	return handle, nil
+end
+
+-- Plays a registered effect. Errors on unknown names and invalid options; returns nil (after a warning) when
+-- the active-effect cap refuses the play (see SetMaxActive). Never yields.
+function AstraVFX.Play(name: string, options: PlayOptions?): Handle?
+	local handle = play(name, options)
 	return handle
 end
 
--- Plays a registered effect. Errors on unknown names and invalid options. Never yields.
-function AstraVFX.Play(name: string, options: PlayOptions?): Handle
-	return play(name, options)
-end
-
--- Like Play, but returns (nil, message) instead of raising.
+-- Like Play, but returns (nil, message) instead of raising; (nil, "limit") when the cap refuses the play.
 function AstraVFX.TryPlay(name: string, options: PlayOptions?): (Handle?, string?)
-	local ok, result = pcall(play, name, options)
+	local ok, result, reason = pcall(play, name, options)
 	if ok then
-		return result, nil
+		return result, reason
 	end
 	return nil, tostring(result)
 end
@@ -715,7 +788,19 @@ function AstraVFX.StopAll(immediate: boolean?)
 	end
 end
 
--- Number of effects started through Play that have not ended yet.
+-- Global cap on active (playing / paused) effects: a whole number >= 1 or math.huge (unlimited). Default 64.
+function AstraVFX.SetMaxActive(n: number)
+	if type(n) ~= "number" or n ~= n or n < 1 or (n ~= INF and n % 1 ~= 0) then
+		error("AstraVFX.SetMaxActive: expected a whole number >= 1 or math.huge, got " .. tostring(n), 2)
+	end
+	maxActive = n
+end
+
+function AstraVFX.GetMaxActive(): number
+	return maxActive
+end
+
+-- Number of effects started through Play that have not ended yet (stopping ones included).
 function AstraVFX.ActiveCount(): number
 	local n = 0
 	for _ in live do
@@ -741,6 +826,7 @@ function AstraVFX._reset()
 	table.clear(aliases)
 	table.clear(seenSources)
 	defaultQuality = "Auto"
+	maxActive = DEFAULT_MAX_ACTIVE
 end
 
 -- Diagnostics: number of cached compiled variants.

@@ -23,6 +23,10 @@
   must produce the same visual state for the same `localTime` regardless of the frame history (scrubbing).
 * `setActive(false)` hides everything (parts `Transparency = 1`, emitters/beams/trails/lights `Enabled = false`).
 * `reset()` restores the freshly built state (used by the pool); particles/trails `Clear()`.
+* Engine clocks: controllers whose instances run on their own clock implement the optional `setTimeScale(scale)`
+  (`Types.ComponentInstance`, MODULE_CONTRACTS §10): `scale` = definition `timeScale` × Play `TimeScale` ×
+  `handle:SetTimeScale`, 0 while paused. Particles (TimeScale), beam (TextureSpeed) and lightning in beam render
+  (TextureSpeed) implement it; the build uses the definition's `timeScale` and `reset()` returns to it.
 * `estimateCost` returns a heuristic `CostEstimate` (counts are exact for the built instances; per-frame and
   overdraw numbers are heuristics and must be labelled as such in the Analyzer).
 * `supportsViewport`: only geometry types (`group`, `part`, `mesh`, `sphere`, `flash`, `shockwave`, `ring`,
@@ -77,7 +81,7 @@ Instances: if `shape == "Point"`: Attachment on Root + ParticleEmitter in it. Ot
 | lightInfluence | number | `0` | 0..1 | LightInfluence |
 | brightness | number | `1` | 0..100 | Brightness |
 | zOffset | number | `0` | −100..100 | ZOffset |
-| timeScale | number | `1` | 0..1 (engine range) | TimeScale (× min(1, effect timeScale)) |
+| timeScale | number | `1` | 0..1 (engine range) | TimeScale = clamp(timeScale × effect time scale, 0, 1) |
 | lockedToPart | boolean | `false` | | LockedToPart |
 | velocityInheritance | number | `0` | 0..1, advanced | VelocityInheritance |
 | windAffectsDrag | boolean | `false` | advanced | WindAffectsDrag |
@@ -89,6 +93,9 @@ Instances: if `shape == "Point"`: Attachment on Root + ParticleEmitter in it. Ot
 
 Channels: transform + `transparency` (fade), `tint`, `rate`, `brightness`, `lightEmission`, `acceleration` (vector3,
 length), `timeScale` (0..1). Events: `emit` (count, quality-scaled by Compiler), `clear`, `enable`, `disable`.
+Effect time scale (`setTimeScale`, §0): the definition's `timeScale` at build time, then the Player's effective rate
+(Play `TimeScale` × `SetTimeScale`, 0 while paused — the engine freezes live particles). The engine range ends at 1:
+slow motion works, a time scale above 1 cannot make particles faster than normal speed.
 `tailTime = lifetime.Max`. `release()` sets `Enabled = false` (live particles finish). Continuous emission =
 `Enabled = (active and rate > 0)`. Bursts: `burst` on activation and `emit` events call `Emit(n)` (engine caps:
 400/s per emitter; an Emit in the same frame the emitter was parented can be ignored by the engine — the Player
@@ -117,7 +124,7 @@ roll is empirical).
 | segments | integer | `10` | 1..1000 (NO quality scaling — the engine reduces beam segments itself; gradients need ≥ keypoints − 1) | Segments |
 | textureLength | number | `1` | 0.01..1000, length | TextureLength |
 | textureMode | enum TextureMode | `"Stretch"` | | TextureMode |
-| textureSpeed | number | `1` | −100..100 | TextureSpeed |
+| textureSpeed | number | `1` | −100..100 | TextureSpeed (× effect time scale: definition, Play option, SetTimeScale; 0 while paused) |
 | faceCamera | boolean | `true` | | FaceCamera |
 | lightEmission | number | `0` | 0..1 | LightEmission |
 | lightInfluence | number | `0` | 0..1 | LightInfluence |
@@ -215,7 +222,9 @@ lights only illuminate as direct children of a BasePart/Attachment under Workspa
 | surfaceSize | vector3 | `[4, 4, 0.2]` | length, Surface only | host Part Size |
 
 Channels: `position`, `rotation`, `brightness`, `range`, `color`, `angle`. Events: `enable`, `disable`.
-Quality: the Compiler drops lights beyond `quality.maxLights` (in component order).
+Quality: `quality.maxLights` counts every light in component order — `light` components and the built-in
+PointLights of `sphere` / `flash` (descriptor `estimateCost(...).lights`). A `light` component beyond the budget is
+dropped together with its descendants; `sphere` / `flash` are built with `light = false` instead (Compiler).
 
 ## 8. `sound` (Audio) → Sound
 
@@ -251,7 +260,7 @@ sin(2π·pulseFrequency·t)).
 | shellTransparency | number | `0.3` | 0..1 |
 | pulseAmplitude | number | `0.05` | 0..1 |
 | pulseFrequency | number | `4` | 0..60 Hz |
-| light | boolean | `true` | |
+| light | boolean | `true` | counts against `quality.maxLights`; off when the budget is used up (§7) |
 | lightBrightness | number | `2` | 0..100 |
 | lightRange | number | `8` | 0..120, length |
 | spin | vector3 | `[0,0,0]` | |
@@ -273,7 +282,7 @@ to `size`; transparency 0 at peak → 1 at the end of decay; light brightness fo
 | hold | number | `0.02` | 0..5 s |
 | decay | number | `0.25` | 0.01..10 s |
 | material | enum Material | `"Neon"` | |
-| light | boolean | `true` | |
+| light | boolean | `true` | counts against `quality.maxLights`; off when the budget is used up (§7) |
 | peakBrightness | number | `10` | 0..100 |
 | range | number | `16` | 0..120, length |
 
@@ -378,8 +387,9 @@ Channels: `position`, `rotation`, `color`, `transparency`.
 Zig-zag polyline from `from` to `to` with `segments` points; perpendicular offsets up to `jitter` with a sin(π·u)
 envelope (endpoints fixed); `branches` side bolts of `branchLength` × main length starting at random points.
 Shape seed = hash(component seed, regenerateCount, floor(localTime × flickerRate)) → deterministic flicker
-(flickerRate 0 = static). `render = "beam"`: Beams between consecutive Attachments (FaceCamera, LightEmission);
-`render = "part"`: Neon Block parts between points (renders in viewport).
+(flickerRate 0 = static). `render = "beam"`: Beams between consecutive Attachments (FaceCamera, LightEmission;
+TextureSpeed = 1, the engine default, × the effect time scale via `setTimeScale`, so a texture scrolls with slow
+motion and stops while paused); `render = "part"`: Neon Block parts between points (renders in viewport).
 
 | key | kind | default | range |
 |---|---|---|---|

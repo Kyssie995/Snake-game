@@ -25,7 +25,9 @@
 	  warning  graph.channel_missing   Tween / SetProperty without a channel
 	  error    graph.channel_unknown   channel not declared by the (registered) target component type
 	  info     graph.channel_unverified target type is not in the component registry; channel not checked
-	  warning  graph.action_unsupported registered target type does not declare the action as an event
+	  warning  graph.action_unsupported registered target type does not declare the action as an event; for
+	                                   SetEnabled (handled by the Player on every type, MODULE_CONTRACTS §11): the
+	                                   target is a structure type (group), which has nothing to switch
 	  error    graph.link_invalid      link entry is not an object
 	  error    graph.link_ref          from / to is not a "nodeId.pinName" string
 	  error    graph.link_node         link references a node that does not exist
@@ -472,22 +474,39 @@ local function checkSemantics(ctx: Context, entry: NodeEntry, path: string)
 			end
 		end
 	elseif componentType and Components.get(componentType) then
-		local action = nodeType.action :: string
-		if nodeType.type == "SetEnabled" and params.enabled == false then
-			action = "disable"
-		end
-		local allowed = (NodeTypes.paramSpec(nodeType, "target") :: PropertySpec).componentTypes
-		local typeAllowed = allowed == nil or contains(allowed, componentType)
-		if typeAllowed and Components.eventSpec(componentType, action) == nil then
-			add(
-				ctx.out,
-				"warning",
-				"graph.action_unsupported",
-				path,
-				label(entry) .. ": component type " .. componentType .. ' does not handle "' .. action .. '"',
-				nil,
-				target
-			)
+		local descriptor = Components.get(componentType) :: Types.ComponentDescriptor
+		if nodeType.type == "SetEnabled" then
+			-- The Player handles SetEnabled on every type (types declaring enable / disable get the event, every
+			-- other type is switched off / on through its activation). Only structure types have nothing to show.
+			if descriptor.category == "Structure" then
+				add(
+					ctx.out,
+					"warning",
+					"graph.action_unsupported",
+					path,
+					label(entry)
+						.. ": component type "
+						.. componentType
+						.. " has no visuals of its own and SetEnabled does not switch its children",
+					"target the child components instead",
+					target
+				)
+			end
+		else
+			local action = nodeType.action :: string
+			local allowed = (NodeTypes.paramSpec(nodeType, "target") :: PropertySpec).componentTypes
+			local typeAllowed = allowed == nil or contains(allowed, componentType)
+			if typeAllowed and Components.eventSpec(componentType, action) == nil then
+				add(
+					ctx.out,
+					"warning",
+					"graph.action_unsupported",
+					path,
+					label(entry) .. ": component type " .. componentType .. ' does not handle "' .. action .. '"',
+					nil,
+					target
+				)
+			end
 		end
 	end
 end

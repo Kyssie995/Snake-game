@@ -188,6 +188,10 @@ returns a `Types.ComponentDescriptor`. Descriptor rules:
 
 * `properties`: every JSON key the component reads, with kind, default, description, ranges, `scale = "length"`
   for distances/sizes/speeds/widths/ranges, `quality = "count"|"segments"` where quality scaling applies.
+  `"segments"` marks procedural subdivisions only (ring segments, lightning points, shockwave layers):
+  `beam.segments` (Beam.Segments) is deliberately NOT quality-scaled — the engine lowers beam segments itself at low
+  graphics quality, and a gradient with n keypoints needs at least n − 1 segments (constraints K14, ARCHITECTURE
+  §5.4); the beam controller enforces that floor.
 * `channels`: animatable channels. Positioned components include `Common.transformChannels()`. Semantics:
   * part-like (`part`, `mesh`, `sphere`, `flash`, `shockwave`, `ring`, `radialBurst`, `debris`, `lightning` in part
     mode): `transparency` sets Part.Transparency directly; `color` sets Part.Color.
@@ -200,8 +204,21 @@ returns a `Types.ComponentDescriptor`. Descriptor rules:
   values only when they change (cache last values), and must append moving parts to `frame.moveParts` instead of
   setting `CFrame` directly.
 * `estimateCost(component, quality)`: heuristic `CostEstimate` (counts of instances, emitters, beams, parts…, rates).
+  Its `lights` count is exact and authoritative: the Compiler's light budget (§15) uses it. A component that builds
+  an optional light of its own (`sphere`, `flash`) declares a boolean property `light`, so the budget can switch the
+  light off instead of dropping the component.
 * `tailTime(component)`: seconds visuals outlive the span (particles: `lifetime.Max`, trails: `lifetime`).
 * Components must work in Studio edit mode (no physics, no `Touched`, no yields).
+* `setTimeScale(scale)` (optional controller method, `Types.ComponentInstance`): `scale` is the effect's effective
+  time scale — definition `timeScale` × Play option `TimeScale` × `handle:SetTimeScale`, and 0 while paused. Components
+  whose engine instances run on their own clock scale their authored values with it: `particles`
+  ParticleEmitter.TimeScale = clamp(clamp(timeScale, 0, 1) × scale, 0, 1) — the engine range ends at 1, so slow motion
+  and pause work but particles can never run faster than normal speed —, `beam` TextureSpeed = textureSpeed × scale,
+  `lightning` (beam render) TextureSpeed = 1 (engine default) × scale. A build starts at the definition's
+  `timeScale`, `reset()` returns to it, invalid values (negative, NaN, ±inf) are ignored, writes happen only when the
+  value changes. The Player calls it in `start()`, on `pause()` / `resume()` / `setTimeScale()` / `stop()` when the
+  value changed (never per frame) and after `seek()` (§17). Trails have no time factor (they age in real time) and
+  sounds keep their PlaybackSpeed, so they do not implement it.
 * Camera components (`cameraShake`, `screenFlash`; COMPONENTS_SPEC §17–18) are client-only and own nothing in the
   container: the shake holds `RunService:BindToRenderStep` bindings while active (shared by all active shakes), the
   flash a `ColorCorrectionEffect` under `workspace.CurrentCamera` while it shows (listed in `controller.instances`
@@ -221,7 +238,8 @@ Graph.canConnect(graph, def, from: string, to: string) -> (boolean, string?)   -
 Graph.findCycle(graph) -> { string }?                                          -- node ids of one cycle
 Graph.compile(graph, def) -> CompiledGraph      -- assumes validate() passed
 Graph.run(compiled: CompiledGraph, trigger: { kind: "play"|"marker"|"event", id: string? },
-          startTime: number, seed: number, cycle: number, effect: CompiledEffect?) -> { ScheduledAction }
+          startTime: number, seed: number, cycle: number, effect: CompiledEffect?) -> (ActionList, RunInfo)
+Graph.staticSchedule(compiled, seed, cycle, effect?) -> (ActionList, RunInfo)   -- play at 0 + every marker trigger
 ```
 Semantics (time-based unrolling, no threads): `OnPlay` fires at 0; `OnMarker(marker)` at the marker time;
 `OnEvent(name)` at the runtime trigger time; `Delay(seconds)` adds time; `Sequence(count, interval)` fires `then1..N`
@@ -232,8 +250,27 @@ lerp(a,b,t))`; `Component(component)` outputs a component id; actions `Emit(targ
 `SetEnabled(target, enabled)`, `Tween(target, channel, value, duration, easing)` (outputs `out` now and `done` after
 duration), `SetProperty(target, channel, value)`, `FireEvent(name)`, `PlaySound(target)`, `Regenerate(target)`.
 Unlinked data inputs fall back to the param with the same name, then the pin default. Random values are
-deterministic per (seed, cycle, node id, invocation index). Exceeding `MAX_GRAPH_ACTIONS` stops unrolling and
-reports a diagnostic-style warning through the returned list's `truncated` flag.
+deterministic per (seed, cycle, trigger, node id, invocation index) — the trigger key keeps flows of different
+triggers (and repeated event fires) independent. Exceeding `MAX_GRAPH_ACTIONS` (or the work budget
+`Graph.MAX_WORK` / queue bound `Graph.MAX_PENDING`) stops unrolling: the returned list (an `ActionList` — a plain
+array of ScheduledActions) is flagged `list.truncated`, and the second return value `RunInfo = { truncated, actions,
+work, diagnostics }` carries a `graph.action_limit` warning. Further extensions (see `Core/Graph/init.luau`):
+`Graph.triggers`, `Graph.resolveParamSpec`, `Graph.pinKind`, and `canConnect` returns a third value, the diagnostic
+code of the failed rule.
+
+Quality and scale of graph values: when `run()` gets the compiled effect, `Emit` counts are × `effect.quality
+.countScale` (rounded, at least 1; 0 emits nothing), Tween / SetProperty values of number channels whose base
+property has `quality = "count"` (particles `rate`) get the Compiler's count rule (v × countScale, at least min(v, 1)
+when v > 0) and "length" channels are × `effect.scale` — graph values share the compiled domain of the channel's
+tracks (§15).
+
+`SetEnabled(target, enabled)` works on every component type, as the Player executes it (§17): types that declare
+the `enable` / `disable` events (particles, beam, trail, light) receive the action through `onAction` (emission /
+visibility toggles while the span stays active); every other type is switched off by the Player (`setActive(false)`
+at once; the component stays dark) and back on with the next evaluation (`enable`: it activates again inside its
+span, so its activation behaviour — bursts, `playOnStart`, `clearOnStart` — runs again). Loop cycles and `seek()`
+clear the switched-off state. `Graph.validate` therefore reports `graph.action_unsupported` for SetEnabled only on
+structure types (`group`): a group has no visuals of its own and SetEnabled does not switch its children.
 
 ## 12. Core/Migration
 
@@ -246,17 +283,22 @@ Never mutates the input (deep copy). Missing `schemaVersion` ⇒ treated as vers
 project brief): components without ids get slug ids, `properties.color: [r,g,b]` → `"#RRGGBB"`,
 `sphere` `initialScale/finalScale` → a `scale` track from initialScale to finalScale over the component duration,
 missing `id` ⇒ slug of `name`. Each migration step appends info diagnostics describing what changed.
+Extension: `raw` may also be JSON text (decoded with Core/Json; invalid text ⇒ `migration.json` error, nil).
 
 ## 13. Core/Validation
 
 ```lua
 Validation.validate(def: any, options: { strict: boolean? }?) -> ValidationResult
 ```
-Pure (no Roblox instances). Uses the registry specs, `Codec.check`, `Easing.check`, `Graph.validate`. Codes (stable,
-documented in docs/EFFECT_FORMAT.md): `effect.*`, `component.*`, `property.unknown|type|range|ref`, `track.*`,
-`keyframe.*`, `event.*`, `marker.*`, `graph.*`, `quality.*`, lints `lint.trail_static`, `lint.particles_silent`,
-`lint.zero_width`, `lint.outside_duration`. Unknown properties are warnings (errors when `strict`). Paths use 1-based
-indices: `components[3].tracks[1].keyframes[2].value`.
+Pure (no Roblox instances) and total: it never throws, whatever `def` is. Uses the registry specs, `Codec.check`,
+`Easing.check`, `Graph.validate`. Codes (stable; the complete table with severities is the header of
+`Core/Validation.luau` and, machine-readable, `Validation.CODES` — the source of docs/EFFECT_FORMAT.md): `effect.*`
+(including `effect.internal` — the validator itself failed on part of the input, reported instead of thrown — and
+`effect.json` — a value that is not plain JSON where no specific check looks; reported once, only without other
+errors), `component.*`, `property.unknown|type|range|ref`, `track.*`, `keyframe.*`, `event.*`, `marker.*`,
+`quality.*`, every `graph.*` code of `Graph.validate` unchanged, lints `lint.trail_static`, `lint.particles_silent`,
+`lint.zero_width`, `lint.outside_duration`, `lint.flash_short`, `lint.filemesh_no_id`. Unknown properties are
+warnings (errors when `strict`). Paths use 1-based indices: `components[3].tracks[1].keyframes[2].value`.
 
 ## 14. Core/Quality
 
@@ -267,20 +309,42 @@ Quality.detect() -> QualityLevel     -- client: UserGameSettings.SavedQualityLev
 Quality.rank(level) -> number        -- Low 1, Medium 2, High 3
 Quality.includes(level, minQuality: QualityLevel?) -> boolean
 ```
+High's unlimited `maxLights` is `math.huge`. Extension: `resolve` also accepts a `QualityProfile` table as the base
+(Compiler `options.quality`); see the header of `Core/Quality.luau` for the override rules and the detect() mapping.
 
 ## 15. Core/Compiler
 
 ```lua
-Compiler.compile(def: EffectDefinition, options: { quality: (QualityLevel | QualityProfile)?, scale: number?,
-                 palette: { [string]: Color3 }?, seed: number? }?) -> CompiledEffect
-Compiler.key(def, options) -> string     -- cache key (id + content hash + options)
+Compiler.compile(def: EffectDefinition, options: { quality: (QualityLevel | "Auto" | QualityProfile)?, scale: number?,
+                 palette: { [string]: Color3 }?, seed: number? }?) -> (CompiledEffect, { Diagnostic })
+Compiler.scheduleForCycle(compiled, cycle: number) -> { ScheduledAction }   -- read-only; the Player's loop cycles
+Compiler.key(def, options?, contentHash: string?) -> string   -- cache key (id + content hash + options)
+Compiler.contentHash(def) -> string                           -- callers with immutable definitions compute it once
 ```
-Assumes a migrated + validated definition. Steps: palette (definition + overrides) → component filter (enabled,
-minQuality; children of removed parents are removed) → topological order → per component: defaults + decode
-(`Codec.decode`), `qualityOverrides`, quality rules (count/segments), effect scale for `scale = "length"`
-properties/channels/positions → tracks (`Curves.compileTrack`) → events (emit counts × countScale, min 1) →
-schedule (`Timeline.staticSchedule` + `Graph.run` for `play` and each marker trigger) → `maxTail`.
+Assumes a migrated + validated definition (defensive anyway: on unvalidated input it skips what it cannot use).
+Steps: palette (definition + overrides) → topological order (parents first, otherwise definition order) → component
+filter (enabled, minQuality; children of removed parents are removed) → per component: defaults + decode
+(`Codec.decode`), `qualityOverrides`, quality rules (count/segments; not for values that come from
+`qualityOverrides`), effect scale for `scale = "length"` properties/channels/positions → light budget (below) →
+tracks (`Curves.compileTrack`; a number channel whose base property has a quality rule — particles `rate` — gets the
+same rule on every keyframe value, so tracks, graph values and the rest value share the compiled domain) → events
+(emit counts × countScale, min 1; 0 stays 0) → schedule = `scheduleForCycle(compiled, 0)` (`Timeline.staticSchedule`
+merged with `Graph.staticSchedule`; at equal times timeline actions first, `order` renumbered) → `maxTail`.
 `seed` = options.seed or def.seed or `Random.hash(def.id)`; per component `Random.hash(seed, component.id)`.
+
+Light budget (`quality.maxLights`, skipped when unlimited): in component order, every built component's lights are
+counted with its descriptor's `estimateCost(component, quality).lights` — `light` components and the built-in
+PointLights of `sphere` / `flash`. A component whose lights no longer fit is built without them when its descriptor
+declares a boolean property `light` (`props.light = false`), otherwise (`light` components) it is dropped together
+with its descendants. The budget is a hard cap (a `qualityOverrides` value `light = true` is switched off too).
+
+`scheduleForCycle(compiled, cycle)`: the static schedule of loop cycle `cycle` (graph random values depend on
+(seed, cycle)); without a graph, or for cycle 0, it returns `compiled.schedule` itself, otherwise a fresh list.
+
+The second return value of `compile()` lists warnings: graph unrolling limits (`graph.action_limit`) and, on
+unvalidated input, skipped components / tracks (`compiler.component_id`, `compiler.parent`, `compiler.component_type`,
+`compiler.parent_cycle`, `compiler.track_channel`, `compiler.track_duplicate`). The runtime ignores them (definitions
+are validated at registration); tools can show them.
 
 ## 16. Core/Builder
 
@@ -289,6 +353,8 @@ Builder.build(compiled: CompiledEffect, options: { parent: Instance?, isPreview:
               name: string? }?) -> BuiltEffect
 BuiltEffect = { container: Folder, root: BasePart, controllers: { [string]: ComponentInstance },
                 order: { string }, destroy: (self) -> () }
+-- extensions: effect: CompiledEffect, isPreview, viewport, destroyed: boolean,
+--             reset: (self) -> ()   -- controller:reset() in build order (Core/Pool, Player:seek)
 ```
 Container `Folder` "AstraVFX_<name>" with attribute `AstraEffect`; preview: `Archivable = false` on every created
 instance + attribute `AstraPreview`. Root: anchored invisible 0.2-stud Part "Root" (same physics-free settings as
@@ -299,19 +365,56 @@ instance + attribute `AstraPreview`. Root: anchored invisible 0.2-stud Part "Roo
 
 ```lua
 Player.new(compiled, built, options: { cframe: CFrame?, attach: Instance?, offset: CFrame?, timeScale: number?,
-           loop: boolean?, onEvent: ((string) -> ())? }) -> Player
+           loop: boolean?, onEvent: ((string) -> ())?,
+           release: ((built) -> boolean)?,   -- extension: hands the copy back (Core/Pool); true = taken
+           autoRelease: boolean? }) -> Player -- extension (default true): false keeps the copy after the end
 player:start() ; player:step(dt) -> boolean (alive) ; player:seek(t) ; player:pause() ; player:resume()
 player:stop(fade: number?) ; player:destroy() ; player:setTimeScale(n) ; player:setCFrame(cf) ; player:setLoop(b)
 player:fire(name)                       -- graph OnEvent trigger
+player:isLooping() ; player:getRootCFrame() ; player:isAlive() ; player:lastMoveCount()   -- extensions
 player.time, player.state (Types.PlayerState), player.cycle
-player.finished: Signal ; player.event: Signal(name) ; player.actionExecuted: Signal(ScheduledAction)
+player.finished: Signal(reason: "finished" | "destroyed") ; player.event: Signal(name)
+player.actionExecuted: Signal(ScheduledAction)
 ```
-Frame algorithm: ARCHITECTURE §5.2. Transform: if a `position`/`rotation` track exists its value replaces the rest
-value; `spin × localTime` is added to rotation; `local = parentLocal * CFrame.new(pos) * fromOrientation(rot)`.
-Graph `tween`/`set` actions create per-(component, channel) overrides evaluated after tracks. `seek(t)` evaluates the
-complete state at `t` with `frame.seeking = true` and no emission; particles are cleared.
-Stop: `release()` all controllers, keep updating until `time > end + maxTail` (or `fade`), then destroy/return to
-pool. Loop: at `duration`, run remaining actions, increment `cycle`, rebuild schedule for the new cycle, reset time.
+Frame algorithm: ARCHITECTURE §5.2; the full rules are in the header of `Core/Player.luau`. Transform: if a
+`position`/`rotation` track exists its value replaces the rest value; `spin × localTime` is added to rotation;
+`local = parentLocal * CFrame.new(pos) * fromOrientation(rot)`. Graph `tween`/`set` actions create per-(component,
+channel) overrides evaluated after tracks. `start()` only poses the copy at t = 0; the first `step()` activates
+components and runs the actions at 0 (never in the frame the copy was built, K6). `seek(t)` resets the copy
+(`built:reset()`), replays the state-changing actions before `t` (overrides, enable/disable, clear, regenerate,
+stop; never emit, play or fire) and evaluates the complete state at `t` with `frame.seeking = true` and no emission;
+particles are cleared. The instance state depends only on (t, cycle) — except the engine clock values
+(ParticleEmitter.TimeScale, Beam.TextureSpeed), which follow the play state (0 while paused).
+
+`SetEnabled` / `enable` / `disable` on a type that does not declare the event switch the component off / on through
+its activation (§11).
+
+Time scale: the effective rate is `options.timeScale / setTimeScale(n)` × `compiled.timeScale` (clamped to
+`Constants.MAX_TIME_SCALE`); 0 while paused. It advances the effect clock and reaches the engine clocks of the copy
+through `controller:setTimeScale(rate)` (§10) in `start()`, on `pause()` (0) / `resume()` / `setTimeScale()` /
+`stop()` when it changes (stopping a paused copy thaws it, so its live particles can finish), and after `seek()`.
+Pause freezes the effect time and, through that hook, live particles and texture scrolling; activation does not
+change while paused.
+
+End and stop: after `duration` (no loop) the player waits for the tail, then finishes; `stop(fade?)` `release()`s
+every controller (no new emission, live particles finish), runs no more actions and finishes after `fade` real
+seconds (default: the tail at the current rate; 0 = now). The tail is REAL seconds:
+`maxTail / clamp(rate, 0.1, 1)` (particles age at most at the rate), recomputed by `setTimeScale`. Finishing hands
+the copy to `options.release` (pool) or destroys it.
+
+Loop: when the time reaches `duration`, the components are evaluated at `duration` first (end-of-cycle evaluation,
+like the last frame of a one-shot effect: spans ending there deactivate, a span lying inside the frame is still
+activated once), the remaining actions (t_prev, duration] run, `cycle` increments, the schedule becomes
+`Compiler.scheduleForCycle(compiled, cycle)` and the time wraps. The cycle state is reset: active components are
+deactivated (they re-activate, so bursts and `playOnStart` happen every cycle), overrides and SetEnabled states are
+cleared, components disabled by a `disable` event get a synthetic `enable`, pending runtime actions move back by one
+duration. At most 64 wraps per step (`Player.MAX_WRAPS`).
+
+User callbacks — `options.onEvent` and the handlers of `finished` / `event` / `actionExecuted` — are dispatched with
+`task.spawn`: immediately and in order (non-yielding handlers behave exactly like a synchronous call), but a
+handler that yields suspends only its own thread, never the Scheduler frame. (Core/Signal's own `Fire` stays
+synchronous, §2.) `onEvent` errors are caught and reported with `warn()`; controller errors propagate (the Scheduler
+isolates failing players).
 
 ## 18. Core/Scheduler & Core/Pool
 
@@ -321,23 +424,46 @@ Scheduler.step(dt)                      -- manual stepping (tests / editor)
 Scheduler.setEventName("Heartbeat" | "PreRender")
 ```
 Exactly one RunService connection while ≥ 1 player is registered; disconnected when empty. dt is clamped to
-[0, 0.1]. A failing player is removed and destroyed (error reported with warn), others continue.
+[0, 0.1]. A failing player is removed and destroyed (error reported with warn), others continue. A player added in
+a frame is activated at the end of the next `step()` and stepped from the one after it, so it is never stepped in
+the frame its copy was built (K6). Extensions: `Scheduler.getEventName()`, `isConnected()`, `players()`, `clear()`.
 ```lua
 Pool.acquire(key) -> BuiltEffect? ; Pool.release(key, built) -> boolean ; Pool.prewarm(key, factory, count)
-Pool.clear(key?) ; Pool.setCapacity(n)   -- default 2 per key; released copies are reset() and parented to nil
+Pool.clear(key?) ; Pool.setCapacity(n, key?)   -- default 2 per key; released copies are reset() and parented to nil
+Pool.capacity(key?) ; Pool.count(key?)
 ```
+`release` returns false when it does not take the copy (pool full, copy destroyed, already pooled, reset failed);
+the caller then destroys it — the pool never destroys what it did not take. `acquire` is LIFO.
 
 ## 19. Runtime API (src/Runtime/init.luau) and Net
 
-Public API as in ARCHITECTURE §5.3. `Play` errors on unknown names (`TryPlay` returns `nil, err`). Effects found in
-`script.Effects` (ModuleScripts returning definitions) are registered lazily. Registration migrates + validates and
-errors with a readable diagnostic summary on invalid definitions.
+Public API as in ARCHITECTURE §5.3 (the full contract is the header of `src/Runtime/init.luau`). `Play` errors on
+unknown names and invalid options (`TryPlay` returns `nil, err`). Effects found in `script.Effects` (ModuleScripts
+returning definitions, StringValues with JSON text, folders of them) are registered lazily. Registration migrates +
+validates and errors with a readable diagnostic summary on invalid definitions.
+
+Compiled variants are cached by `Compiler.key` (content hash computed once per registration, at most 64 variants;
+the oldest is dropped with its pooled copies). An effect copy goes back to the pool when it ends (finish, Stop,
+Destroy) only while its cache entry exists and its container is still parented: a container removed from the outside
+(cleared folder, destroyed parent such as a respawned character) is destroyed, never pooled.
+
+Active-effect cap: `AstraVFX.SetMaxActive(n)` (whole number ≥ 1 or `math.huge` = unlimited; default 64,
+`AstraVFX.DEFAULT_MAX_ACTIVE`) / `AstraVFX.GetMaxActive()`. An effect counts while it is playing or paused (not once
+it is stopping, finished or destroyed; `ActiveCount()` also includes the stopping ones that linger for their tail).
+When a `Play` would make more than n effects count, the oldest counting effects that do not loop
+(`Player:isLooping()`) are stopped gracefully with `Stop()` — as many as needed, normally one — and the new effect
+plays. When the looping effects alone fill the cap, nothing is stopped and the new play is refused: `warn()`, `Play`
+returns nil (its return type is `Handle?`), `TryPlay` returns `(nil, "limit")`. Lowering the cap does not touch
+running effects; it applies to the next `Play`. Name and option errors are checked before the cap. The cap decides
+before compiling (a refused play builds nothing); the evicted effects are stopped only once the new copy and its
+player exist, so a play that fails on the way (compile / build error) stops nothing.
 
 `Net` (src/Runtime/Net.luau): server `Net.Init()`, `Net.PlayAll(name, opts)`, `Net.PlayFor(players, name, opts)`,
 `Net.PlayNear(position, radius, name, opts)`; client `Net.Listen()`. Uses a RemoteEvent (and an
 UnreliableRemoteEvent for `opts.Unreliable`) created by the server under the module. Serializable options only:
 `CFrame`, `Position`, `Attach` (Instance reference), `Scale`, `TimeScale`, `Seed`, `Quality`. Client clamps `Scale`
-to [0.05, 20], `TimeScale` to [0.05, 10] and ignores unknown names.
+to [0.05, 20], `TimeScale` to [0.05, 10] and ignores unknown names. A play the client's cap refuses is counted in
+`Net.stats.ignored` (the runtime has warned already).
 
 ## 20. Authoring
 

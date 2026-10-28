@@ -23,8 +23,12 @@
 	render = "beam": one Attachment per polyline point on ctx.root (Attachment.CFrame = localCFrame × point) and one
 	Beam per sub-segment between consecutive attachments, parented to the Root part: FaceCamera = true,
 	Segments = 1, Width0 = Width1 = thickness·s, CurveSize 0, LightEmission / Brightness / Texture from the
-	properties, LightInfluence 0, Color = ColorSequence(color), Transparency = NumberSequence(transparency).
-	Beams do not render in a ViewportFrame, so a viewport build always uses part mode.
+	properties, LightInfluence 0, Color = ColorSequence(color), Transparency = NumberSequence(transparency),
+	TextureSpeed = 1 (the engine default; there is no textureSpeed property) × the effect's effective time scale:
+	the definition's timeScale at build time, then setTimeScale from the Player (0 while paused), so a texture
+	scrolls with slow motion and stops while paused. reset() restores the build value. The flicker needs no
+	such hook: it is a function of the local (effect) time.
+	Beams do not render in a ViewportFrame, so a viewport build always uses part mode (no setTimeScale).
 	render = "part": one Block part per sub-segment (material from the properties, Neon by default) with
 	Size = (w, w, |b − a|) and local CFrame lookAt(midpoint, b) (with a fallback up axis for vertical segments,
 	where CFrame.lookAt with +Y up is undefined); world CFrames are queued on frame.moveParts.
@@ -53,6 +57,13 @@ local BRANCH_JITTER = 0.5
 local BRANCH_MIN_ANGLE = 20
 local BRANCH_MAX_ANGLE = 45
 local BUCKET_EPSILON = 1e-9
+-- Beam.TextureSpeed default (API dump 0.745); beam render scales it with the effect time scale.
+local TEXTURE_SPEED = 1
+local INF = math.huge
+
+local function isFinite(x: any): boolean
+	return type(x) == "number" and x == x and x ~= INF and x ~= -INF
+end
 
 -- Enum.Material items without the NotBrowsable terrain-only entries (Air, Water). API dump 0.745.
 local MATERIALS = {
@@ -362,6 +373,7 @@ local descriptor: Types.ComponentDescriptor = {
 		local layout = layoutOf(props)
 		local segments = segmentsOf(layout)
 		local partMode = props.render == "part" or ctx.viewport
+		local builtTimeScale: number = if isFinite(ctx.effect.timeScale) then math.max(ctx.effect.timeScale, 0) else 1
 
 		local polylines: { { Vector3 } } = { {} }
 		for b = 1, layout.branches do
@@ -403,6 +415,7 @@ local descriptor: Types.ComponentDescriptor = {
 				beam.LightEmission = props.lightEmission
 				beam.LightInfluence = 0
 				beam.Brightness = props.brightness
+				beam.TextureSpeed = TEXTURE_SPEED * builtTimeScale
 				ctx.tagInstance(beam, component.id)
 				beam.Parent = ctx.root
 				beams[i] = beam
@@ -425,6 +438,7 @@ local descriptor: Types.ComponentDescriptor = {
 		local alive = true
 		local active = false
 		local released = false
+		local effectTimeScale = builtTimeScale
 		local localTime = 0
 		-- Regenerations: authored events (pure function of localTime) + runtime actions (counted).
 		local runtimeRegenerations = 0
@@ -610,9 +624,22 @@ local descriptor: Types.ComponentDescriptor = {
 			end
 		end
 
+		-- Beam render: TextureSpeed = TEXTURE_SPEED × effect time scale (written when the scale changes).
+		local function applyTimeScale(scale: number)
+			if scale == effectTimeScale then
+				return
+			end
+			effectTimeScale = scale
+			local speed = TEXTURE_SPEED * scale
+			for _, beam in beams do
+				beam.TextureSpeed = speed
+			end
+		end
+
 		local function restore()
 			active = false
 			released = false
+			applyTimeScale(builtTimeScale)
 			localTime = 0
 			runtimeRegenerations = 0
 			from = props.from
@@ -712,6 +739,14 @@ local descriptor: Types.ComponentDescriptor = {
 			ensureShape()
 			refresh()
 			place(frame)
+		end
+
+		if not partMode then
+			function controller.setTimeScale(_self: ComponentInstance, scale: number)
+				if alive and isFinite(scale) and scale >= 0 then
+					applyTimeScale(scale)
+				end
+			end
 		end
 
 		function controller.release(_self: ComponentInstance)

@@ -847,14 +847,43 @@ return function(T: any, use: (string) -> any, ctx: any)
 				local p = H:player(Fixtures.full(Json), { quality = "High" }, { cframe = CFrame.new(0, 10, 0) })
 				return p
 			end
+			-- The engine clocks follow the play state (paused -> 0), not the history: compare them separately.
+			local CLOCKS = { TimeScale = true, TextureSpeed = true }
+			local function state(container: any): any
+				local out = {}
+				for key, props in H:snapshot(container) do
+					local kept = {}
+					for name, value in props do
+						if not CLOCKS[name] then
+							kept[name] = value
+						end
+					end
+					out[key] = kept
+				end
+				return out
+			end
+			local function clocks(container: any): { number }
+				local out = {}
+				for _, inst in container:GetDescendants() do
+					if inst:IsA("ParticleEmitter") then
+						table.insert(out, (inst :: any).TimeScale)
+					elseif inst:IsA("Beam") then
+						table.insert(out, (inst :: any).TextureSpeed)
+					end
+				end
+				return out
+			end
 			local mark = H:emitMark()
 			local clears = #ctx.fakes.clears
 			local a = fresh()
 			a.player:seek(0.5)
 			expect(a.player.state).toBe("paused")
 			expect(a.player.time).toBe(0.5)
-			local snapA = H:snapshot(a.built.container)
+			local snapA = state(a.built.container)
 			expect(H:emitsSince(mark)).toEqual({})
+			for _, v in clocks(a.built.container) do
+				expect(v).toBe(0) -- paused: frozen
+			end
 
 			local b = fresh()
 			b.player:start()
@@ -866,12 +895,15 @@ return function(T: any, use: (string) -> any, ctx: any)
 			local mark2 = H:emitMark()
 			b.player:seek(0.5)
 			expect(H:emitsSince(mark2)).toEqual({})
-			expect(H:snapshot(b.built.container)).toEqual(snapA)
+			expect(state(b.built.container)).toEqual(snapA)
 			expect(b.player.state).toBe("playing")
+			a.player:resume()
+			expect(clocks(b.built.container)).toEqual(clocks(a.built.container)) -- both playing at rate 1
+			expect(H:snapshot(b.built.container)).toEqual(H:snapshot(a.built.container))
 
 			b.player:seek(1.8)
 			b.player:seek(0.5)
-			expect(H:snapshot(b.built.container)).toEqual(snapA)
+			expect(state(b.built.container)).toEqual(snapA)
 			expect(H:emitsSince(mark2)).toEqual({})
 			expect(#ctx.fakes.clears > clears).toBe(true) -- particles were cleared through the controllers
 
@@ -1134,7 +1166,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 			expect(p.built.destroyed).toBe(true)
 		end)
 
-		T.itIf(isLune, "timeScale scales effect time but not the tail", function()
+		T.itIf(isLune, "timeScale scales the effect time", function()
 			local def = burstDef()
 			def.timeScale = 2
 			local p = H:player(def, nil, { timeScale = 0.25 })
@@ -1148,6 +1180,148 @@ return function(T: any, use: (string) -> any, ctx: any)
 				p.player:setTimeScale(-1)
 			end).toThrow("setTimeScale")
 		end)
+
+		local function scaledDef(): any
+			return {
+				schemaVersion = 1,
+				id = "scaled",
+				name = "Scaled",
+				duration = 2,
+				timeScale = 0.5,
+				components = R(
+					{ id = "sparks", name = "Sparks", type = "particles", properties = { rate = 10, timeScale = 0.8 } },
+					{ id = "ray", name = "Ray", type = "beam", properties = { textureSpeed = 2 } },
+					{ id = "core", name = "Core", type = "part" }
+				),
+			}
+		end
+
+		T.itIf(
+			isLune,
+			"propagates the effective time scale to the controllers (start, pause, resume, setTimeScale, seek)",
+			function()
+				local p = H:player(scaledDef(), nil, { timeScale = 0.5 })
+				local emitter = emitterOf(p, "sparks")
+				local beam = p.built.controllers.ray.instances[1]
+				local calls: { number } = {}
+				local controller = p.built.controllers.sparks
+				local original = controller.setTimeScale
+				controller.setTimeScale = function(self: any, scale: number)
+					table.insert(calls, scale)
+					original(self, scale)
+				end
+				-- built with the definition's timeScale only
+				expect(emitter.TimeScale).toBeCloseTo(0.4) -- 0.8 × 0.5
+				expect(beam.TextureSpeed).toBeCloseTo(1) -- 2 × 0.5
+				p.player:start() -- rate 0.25 = 0.5 (definition) × 0.5 (option)
+				expect(emitter.TimeScale).toBeCloseTo(0.2)
+				expect(beam.TextureSpeed).toBeCloseTo(0.5)
+				H:steps(p.player, 5, DT)
+				expect(calls).toEqual({ 0.25 }) -- once per change, not per frame
+				p.player:pause()
+				expect(emitter.TimeScale).toBe(0) -- the engine freezes live particles
+				expect(beam.TextureSpeed).toBe(0)
+				p.player:setTimeScale(2) -- remembered, but the copy stays frozen while paused
+				p.player:step(DT)
+				expect(emitter.TimeScale).toBe(0)
+				p.player:resume() -- rate 1
+				expect(emitter.TimeScale).toBeCloseTo(0.8)
+				expect(beam.TextureSpeed).toBeCloseTo(2)
+				p.player:setTimeScale(6) -- rate 3: particles stop at the engine maximum 1, beams scroll faster
+				expect(emitter.TimeScale).toBeCloseTo(1)
+				expect(beam.TextureSpeed).toBeCloseTo(6)
+				expect(calls).toEqual({ 0.25, 0, 1, 3 })
+				-- seek resets the copy to its built state and applies the current scale again
+				p.player:seek(0.5)
+				expect(emitter.TimeScale).toBeCloseTo(1)
+				expect(beam.TextureSpeed).toBeCloseTo(6)
+				p.player:pause()
+				p.player:seek(0.75)
+				expect(emitter.TimeScale).toBe(0)
+				expect(beam.TextureSpeed).toBe(0)
+				p.player:setTimeScale(0) -- a zero time scale freezes like a pause
+				p.player:resume()
+				expect(emitter.TimeScale).toBe(0)
+				expect(beam.TextureSpeed).toBe(0)
+				p.player:setTimeScale(1)
+				expect(emitter.TimeScale).toBeCloseTo(0.4)
+				expect(beam.TextureSpeed).toBeCloseTo(1)
+				p.player:destroy()
+				local n = #calls
+				p.player:setTimeScale(2)
+				expect(#calls).toBe(n) -- nothing reaches a released copy
+			end
+		)
+
+		T.itIf(isLune, "stop() of a paused effect unfreezes the engine clocks so live particles can finish", function()
+			local p = H:player(scaledDef())
+			p.player:start()
+			p.player:step(DT)
+			p.player:pause()
+			expect(emitterOf(p, "sparks").TimeScale).toBe(0)
+			p.player:stop()
+			expect(p.player.state).toBe("stopping")
+			expect(emitterOf(p, "sparks").TimeScale).toBeCloseTo(0.4) -- 0.8 × 0.5 (rate)
+			expect(p.built.controllers.ray.instances[1].TextureSpeed).toBeCloseTo(1)
+		end)
+
+		T.itIf(isLune, "an Autoplay-style pause right after start() freezes the copy before its first frame", function()
+			local p = H:player(scaledDef())
+			p.player:start()
+			p.player:pause()
+			expect(emitterOf(p, "sparks").TimeScale).toBe(0)
+			p.player:resume()
+			expect(emitterOf(p, "sparks").TimeScale).toBeCloseTo(0.4)
+		end)
+
+		T.itIf(
+			isLune,
+			"the tail and the stop linger follow the effective rate (particles age at min(1, rate))",
+			function()
+				local function tailDef(): any
+					return {
+						schemaVersion = 1,
+						id = "tail",
+						name = "Tail",
+						duration = 1,
+						components = R({
+							id = "sparks",
+							name = "Sparks",
+							type = "particles",
+							properties = { rate = 10, lifetime = { 0.4, 0.4 } },
+						}),
+					}
+				end
+				-- rate 0.5: the effect ends after 2 real seconds (8 × 0.25), particles live 0.8 real seconds
+				local p = H:player(tailDef(), nil, { timeScale = 0.5 })
+				p.player:start()
+				local alive = {}
+				for _ = 1, 12 do
+					table.insert(alive, p.player:step(0.25))
+				end
+				-- steps 9-11 are the tail (0, 0.25, 0.5, 0.75 s); a rate-independent tail of 0.4 s would end at step 10
+				expect(alive).toEqual({ true, true, true, true, true, true, true, true, true, true, true, false })
+
+				-- stop(): the default linger is the tail at the current rate
+				local q = H:player(tailDef(), nil, { timeScale = 0.5 })
+				q.player:start()
+				q.player:step(0.25)
+				q.player:stop()
+				expect({ q.player:step(0.25), q.player:step(0.25), q.player:step(0.25), q.player:step(0.25) }).toEqual({
+					true,
+					true,
+					true,
+					false,
+				})
+				-- faster than real time: particles cannot age faster than 1, so the tail is the lifetime
+				local r = H:player(tailDef(), nil, { timeScale = 0.5 })
+				r.player:start()
+				r.player:setTimeScale(6)
+				r.player:step(0.25)
+				r.player:stop()
+				expect({ r.player:step(0.25), r.player:step(0.25) }).toEqual({ true, false })
+			end
+		)
 
 		T.itIf(isLune, "destroy() is immediate and idempotent; options.release can take the copy", function()
 			local taken: any = nil

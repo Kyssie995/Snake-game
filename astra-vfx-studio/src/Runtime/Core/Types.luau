@@ -363,6 +363,13 @@ export type ComponentInstance = {
 	onAction: (self: ComponentInstance, action: ScheduledAction, frame: FrameContext) -> (),
 	-- Optional per-frame procedural update while active. localTime is relative to the component start.
 	update: ((self: ComponentInstance, localTime: number, frame: FrameContext) -> ())?,
+	-- Optional: the effect's effective time scale (finite, >= 0) = definition timeScale × Play option ×
+	-- setTimeScale, 0 while paused. For engine instances that run on their own clock: ParticleEmitter.TimeScale =
+	-- clamp(authored × scale, 0, 1) (the engine range ends at 1, so particles cannot speed up), Beam.TextureSpeed
+	-- = authored × scale. The Player calls it in start(), on pause / resume / setTimeScale / stop and after seek(),
+	-- never per frame. A build starts at the definition's timeScale, and reset() goes back to that build state.
+	-- Ignore invalid values (negative, NaN, infinite).
+	setTimeScale: ((self: ComponentInstance, scale: number) -> ())?,
 	-- Called when the effect is stopping gracefully: stop emitting, let existing particles finish.
 	release: (self: ComponentInstance) -> (),
 	-- Restores the freshly-built state (authored property values, no particles) so a pooled copy can replay.

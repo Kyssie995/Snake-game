@@ -22,6 +22,8 @@ export type SpecContext = {
 	environment: "lune" | "studio",
 	-- Optional engine fakes (only in Lune). Specs that need them should skip when nil.
 	fakes: any?,
+	-- Optional file access (only in Lune): reads a repository file, path relative to the project directory.
+	readFile: ((path: string) -> string)?,
 }
 
 export type TestResult = {

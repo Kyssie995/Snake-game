@@ -1256,7 +1256,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 				T.expect(e.LightEmission).toBe(1)
 			end)
 
-			T.it("TimeScale = clamp(timeScale, 0, 1) × min(1, effect time scale)", function()
+			T.it("TimeScale = clamp(clamp(timeScale, 0, 1) × effect time scale, 0, 1)", function()
 				local h = harness()
 				local slow = buildWith(h, "particles", { timeScale = 0.8 }, nil, function(_comp: any, bctx: any)
 					bctx.effect.timeScale = 0.5
@@ -1267,11 +1267,46 @@ return function(T: any, use: (string) -> any, ctx: any)
 				T.expect(e.TimeScale).toBeCloseTo(0.5)
 				slow:apply("timeScale", 0.2)
 				T.expect(e.TimeScale).toBeCloseTo(0.1)
+				-- the engine range ends at 1: fast motion cannot speed particles up beyond normal speed
 				local fast = buildWith(h, "particles", { timeScale = 0.8 }, { id = "fast" }, function(_c: any, b: any)
 					b.effect.timeScale = 3
 				end)
-				T.expect(fast.instances[1].TimeScale).toBeCloseTo(0.8)
+				T.expect(fast.instances[1].TimeScale).toBeCloseTo(1)
+				local half = buildWith(h, "particles", { timeScale = 0.25 }, { id = "half" }, function(_c: any, b: any)
+					b.effect.timeScale = 2
+				end)
+				T.expect(half.instances[1].TimeScale).toBeCloseTo(0.5)
 			end)
+
+			T.it(
+				"setTimeScale(s) rescales TimeScale (authored × s, clamped to 0..1); reset restores the build",
+				function()
+					local h = harness()
+					local c = buildWith(h, "particles", { timeScale = 0.8 }, nil, function(_comp: any, bctx: any)
+						bctx.effect.timeScale = 0.5
+					end)
+					local e = c.instances[1]
+					T.expect(type(c.setTimeScale)).toBe("function")
+					c:setTimeScale(0.25)
+					T.expect(e.TimeScale).toBeCloseTo(0.2)
+					c:setTimeScale(0) -- paused: the engine freezes the particles
+					T.expect(e.TimeScale).toBe(0)
+					c:setTimeScale(4)
+					T.expect(e.TimeScale).toBeCloseTo(1)
+					c:apply("timeScale", 0.1) -- the channel keeps the current scale
+					T.expect(e.TimeScale).toBeCloseTo(0.4)
+					c:setTimeScale(1)
+					T.expect(e.TimeScale).toBeCloseTo(0.1)
+					for _, bad in { -1, 0 / 0, math.huge } do
+						c:setTimeScale(bad) -- ignored: negative, NaN and infinite scales leave the emitter alone
+						T.expect(e.TimeScale).toBeCloseTo(0.1)
+					end
+					c:reset() -- the freshly built state: authored timeScale × the definition's timeScale
+					T.expect(e.TimeScale).toBeCloseTo(0.4)
+					c:setTimeScale(0.5)
+					T.expect(e.TimeScale).toBeCloseTo(0.4)
+				end
+			)
 
 			T.it("Point: setTransform writes the attachment CFrame (relative to Root), never moveParts", function()
 				local h = harness()
@@ -1549,6 +1584,26 @@ return function(T: any, use: (string) -> any, ctx: any)
 					T.expect(beam.TextureSpeed).toBe(-2)
 				end
 			)
+
+			T.it("setTimeScale(s) rescales TextureSpeed (authored × s); reset restores the build", function()
+				local h = harness()
+				local c = buildWith(h, "beam", { textureSpeed = 2 }, nil, function(_comp: any, bctx: any)
+					bctx.effect.timeScale = 0.5
+				end)
+				local beam = c.instances[1]
+				T.expect(beam.TextureSpeed).toBe(1)
+				T.expect(type(c.setTimeScale)).toBe("function")
+				c:setTimeScale(3) -- beams have no engine time factor, so fast motion works too
+				T.expect(beam.TextureSpeed).toBe(6)
+				c:apply("textureSpeed", -1)
+				T.expect(beam.TextureSpeed).toBe(-3)
+				c:setTimeScale(0) -- paused: the texture stops scrolling
+				T.expect(beam.TextureSpeed).toBe(0)
+				c:setTimeScale(-2)
+				T.expect(beam.TextureSpeed).toBe(0)
+				c:reset()
+				T.expect(beam.TextureSpeed).toBe(1)
+			end)
 
 			T.it("transparency fade and tint rebuild the sequences only when the value changes", function()
 				local h = harness()

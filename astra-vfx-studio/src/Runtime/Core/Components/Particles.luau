@@ -24,8 +24,12 @@
 	    [v − e, v + e] through t' = 1 − (1 − t)(1 − fade), i.e. value' = 1 − (1 − v)(1 − fade) and
 	    envelope' = e·(1 − fade) (local fadeSequence; Common.fadeSequence keeps the envelope, so a fade of 1 would
 	    still show particles whose random offset is negative).
-	  * TimeScale = clamp(timeScale, 0, 1) × min(1, effect timeScale) — the engine range is 0..1, so slow motion
-	    works but fast motion cannot speed particles up.
+	  * TimeScale = clamp(clamp(timeScale, 0, 1) × s, 0, 1) with s = the effect's effective time scale: the
+	    definition's timeScale at build time, then whatever the Player passes to setTimeScale (definition ×
+	    Play option × handle:SetTimeScale, 0 while paused — the engine freezes live particles). The engine range
+	    is 0..1, so slow motion works but fast motion cannot speed particles up beyond normal speed (VERIFIED,
+	    docs/ROBLOX_API_CONSTRAINTS.md §1.3; Studio TimeScale bugs PE-B1 / U2 are REPORTED). Written only when
+	    the value changes; reset() restores the build value.
 	  * The `rate` channel works in the same (compiled) domain as its baseProperty `rate`: values are written as
 	    given, clamped to the 400/s engine cap. Applying the rest value props.rate (already × countScale) therefore
 	    leaves the built Rate unchanged. Quality scaling of animated rates belongs to the Compiler, like every
@@ -45,6 +49,11 @@ local channel = Common.channel
 
 local DEFAULT_EMIT_COUNT = 16 -- ParticleEmitter:Emit() default (engine)
 local WHITE = Color3.new(1, 1, 1)
+local INF = math.huge
+
+local function isFinite(x: any): boolean
+	return type(x) == "number" and x == x and x ~= INF and x ~= -INF
+end
 
 local SHAPES: { [string]: Enum.ParticleEmitterShape } = {
 	Box = Enum.ParticleEmitterShape.Box,
@@ -277,7 +286,7 @@ local descriptor: Types.ComponentDescriptor = {
 			"timeScale",
 			"number",
 			1,
-			"Simulation speed 0..1 (engine range), multiplied by min(1, effect time scale).",
+			"Simulation speed 0..1 (engine range); the emitter runs at clamp(timeScale × effect time scale, 0, 1).",
 			{ category = "Emission", min = 0, max = 1 }
 		),
 		prop(
@@ -360,7 +369,7 @@ local descriptor: Types.ComponentDescriptor = {
 			scale = "length",
 			baseProperty = "acceleration",
 		}),
-		channel("timeScale", "number", "Simulation speed 0..1 (× min(1, effect time scale)).", {
+		channel("timeScale", "number", "Simulation speed 0..1 (× effect time scale, clamped to 0..1).", {
 			min = 0,
 			max = 1,
 			baseProperty = "timeScale",
@@ -379,7 +388,7 @@ local descriptor: Types.ComponentDescriptor = {
 		local quality = ctx.effect.quality
 		local countScale: number = quality.countScale
 		local sizeCompensation: number = quality.sizeCompensation
-		local effectTimeScale = math.clamp(ctx.effect.timeScale, 0, 1)
+		local builtTimeScale: number = if isFinite(ctx.effect.timeScale) then math.max(ctx.effect.timeScale, 0) else 1
 
 		local shapeEnum = volumeShape(props.shape)
 		local isPoint = not shapeEnum
@@ -423,7 +432,8 @@ local descriptor: Types.ComponentDescriptor = {
 		emitter.LightInfluence = props.lightInfluence
 		emitter.Brightness = baseBrightness
 		emitter.ZOffset = props.zOffset
-		emitter.TimeScale = baseTimeScale * effectTimeScale
+		local builtEngineTimeScale = math.clamp(baseTimeScale * builtTimeScale, 0, 1)
+		emitter.TimeScale = builtEngineTimeScale
 		emitter.LockedToPart = props.lockedToPart
 		emitter.VelocityInheritance = props.velocityInheritance
 		emitter.WindAffectsDrag = props.windAffectsDrag
@@ -464,6 +474,8 @@ local descriptor: Types.ComponentDescriptor = {
 		local lightEmission = baseLightEmission
 		local acceleration = baseAcceleration
 		local timeScale = baseTimeScale
+		local effectTimeScale = builtTimeScale
+		local writtenTimeScale = builtEngineTimeScale
 		local lastCFrame: CFrame? = nil
 
 		local function refreshEnabled()
@@ -480,6 +492,15 @@ local descriptor: Types.ComponentDescriptor = {
 			if isSeeking ~= seeking then
 				seeking = isSeeking
 				refreshEnabled()
+			end
+		end
+
+		-- ParticleEmitter.TimeScale = clamp(authored × effect time scale, 0, 1), written only when it changes.
+		local function writeTimeScale()
+			local v = math.clamp(timeScale * effectTimeScale, 0, 1)
+			if v ~= writtenTimeScale then
+				writtenTimeScale = v
+				emitter.TimeScale = v
 			end
 		end
 
@@ -564,7 +585,7 @@ local descriptor: Types.ComponentDescriptor = {
 					local v = math.clamp(value, 0, 1)
 					if v ~= timeScale then
 						timeScale = v
-						emitter.TimeScale = v * effectTimeScale
+						writeTimeScale()
 					end
 				end
 			elseif name == "scale" then
@@ -615,6 +636,13 @@ local descriptor: Types.ComponentDescriptor = {
 			end
 		end
 
+		function controller.setTimeScale(_self, scale: number)
+			if isFinite(scale) and scale >= 0 and scale ~= effectTimeScale then
+				effectTimeScale = scale
+				writeTimeScale()
+			end
+		end
+
 		function controller.release(_self)
 			released = true
 			refreshEnabled()
@@ -641,7 +669,9 @@ local descriptor: Types.ComponentDescriptor = {
 			acceleration = baseAcceleration
 			emitter.Acceleration = baseAcceleration
 			timeScale = baseTimeScale
-			emitter.TimeScale = baseTimeScale * effectTimeScale
+			effectTimeScale = builtTimeScale
+			writtenTimeScale = builtEngineTimeScale
+			emitter.TimeScale = builtEngineTimeScale
 			scale = component.scale
 			applyScale()
 			lastCFrame = nil

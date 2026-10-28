@@ -1,0 +1,1 @@
+{"schemaVersion":1,"name":"VioletImpact","duration":2.5,"components":[{"id":"core","type":"sphere","startTime":0,"duration":1.2,"properties":{"color":[150,65,255],"initialScale":1,"finalScale":8}}]}

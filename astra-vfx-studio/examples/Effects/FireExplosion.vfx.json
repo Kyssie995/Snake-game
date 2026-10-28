@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "id": "fire-explosion-demo",
+  "name": "FireExplosion",
+  "description": "Kompakte Feuerexplosion für das Beispiel-Place (examples/): Blitz, Feuerball, Funken, Druckwelle, Rauch, Licht. Marker \"Impact\" bei 0.12 s.",
+  "tags": ["example", "fire", "explosion"],
+  "duration": 2,
+  "palette": {
+    "ember": "#C2410C",
+    "fire": "#FF7A1A",
+    "hot": "#FFE08A",
+    "smoke": "#3B3634"
+  },
+  "markers": [
+    {
+      "id": "impact",
+      "phase": "impact",
+      "time": 0.12,
+      "label": "Impact",
+      "event": "Impact"
+    }
+  ],
+  "components": [
+    {
+      "id": "flash",
+      "name": "Flash",
+      "type": "flash",
+      "duration": 0.45,
+      "startTime": 0.1,
+      "phase": "impact",
+      "transform": {
+        "position": [0, 2, 0]
+      },
+      "properties": {
+        "attack": 0.04,
+        "color": "$hot",
+        "decay": 0.3,
+        "hold": 0.03,
+        "peakBrightness": 12,
+        "range": 24,
+        "size": 10,
+        "startSize": 2
+      }
+    },
+    {
+      "id": "fireball",
+      "name": "Fireball",
+      "type": "sphere",
+      "duration": 0.7,
+      "startTime": 0.1,
+      "phase": "action",
+      "transform": {
+        "position": [0, 2, 0]
+      },
+      "properties": {
+        "coreColor": "$hot",
+        "light": false,
+        "pulseAmplitude": 0.08,
+        "radius": 1.5,
+        "shellColor": "$fire",
+        "shellTransparency": 0.2
+      },
+      "tracks": [
+        {
+          "id": "radius",
+          "channel": "radius",
+          "keyframes": [
+            {
+              "time": 0,
+              "value": 1.5,
+              "easing": "Quad"
+            },
+            {
+              "time": 0.6,
+              "value": 6
+            }
+          ]
+        },
+        {
+          "id": "fade",
+          "channel": "transparency",
+          "keyframes": [
+            {
+              "time": 0,
+              "value": 0,
+              "easing": "Quad.In"
+            },
+            {
+              "time": 0.7,
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": "cool",
+          "channel": "shellColor",
+          "keyframes": [
+            {
+              "time": 0,
+              "value": "$fire"
+            },
+            {
+              "time": 0.7,
+              "value": "$ember"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sparks",
+      "name": "Sparks",
+      "type": "particles",
+      "duration": 0.2,
+      "startTime": 0.12,
+      "phase": "impact",
+      "transform": {
+        "position": [0, 2, 0]
+      },
+      "properties": {
+        "acceleration": [0, -40, 0],
+        "burst": 60,
+        "color": [
+          [0, "$hot"],
+          [1, "$fire"]
+        ],
+        "drag": 2,
+        "lifetime": [0.4, 0.9],
+        "lightEmission": 1,
+        "rate": 0,
+        "size": [
+          [0, 0.6],
+          [1, 0.1]
+        ],
+        "speed": [25, 45],
+        "spreadAngle": [180, 180],
+        "texture": "rbxasset://textures/particles/fire_sparks_main.dds",
+        "transparency": [
+          [0, 0],
+          [0.7, 0.2],
+          [1, 1]
+        ]
+      }
+    },
+    {
+      "id": "shockwave",
+      "name": "Shockwave",
+      "type": "shockwave",
+      "duration": 0.6,
+      "startTime": 0.12,
+      "phase": "impact",
+      "transform": {
+        "position": [0, 0.2, 0]
+      },
+      "properties": {
+        "color": "$fire",
+        "endRadius": 16,
+        "height": 0.25,
+        "layers": 2,
+        "material": "Neon",
+        "startRadius": 1,
+        "startTransparency": 0.2
+      }
+    },
+    {
+      "id": "smoke",
+      "name": "Smoke",
+      "type": "particles",
+      "duration": 0.5,
+      "startTime": 0.15,
+      "phase": "dissipation",
+      "transform": {
+        "position": [0, 1.5, 0]
+      },
+      "properties": {
+        "acceleration": [0, 3, 0],
+        "color": "$smoke",
+        "lifetime": [1, 1.4],
+        "lightInfluence": 1,
+        "rate": 40,
+        "rotSpeed": [-40, 40],
+        "size": [
+          [0, 2],
+          [1, 6]
+        ],
+        "speed": [3, 6],
+        "spreadAngle": [60, 60],
+        "texture": "rbxasset://textures/particles/smoke_main.dds",
+        "transparency": [
+          [0, 0.4],
+          [1, 1]
+        ]
+      }
+    },
+    {
+      "id": "glow",
+      "name": "Glow",
+      "type": "light",
+      "duration": 0.8,
+      "startTime": 0.1,
+      "phase": "impact",
+      "transform": {
+        "position": [0, 2, 0]
+      },
+      "properties": {
+        "brightness": 8,
+        "color": "$fire",
+        "range": 22
+      },
+      "tracks": [
+        {
+          "id": "brightness",
+          "channel": "brightness",
+          "keyframes": [
+            {
+              "time": 0,
+              "value": 8,
+              "easing": "Quad"
+            },
+            {
+              "time": 0.8,
+              "value": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -19,7 +19,10 @@
 
 	Channels: transform (scale = width multiplier), transparency (fade) / tint (sequence rebuild only on change),
 	width0/1, curveSize0/1, from/to (move the attachments), brightness, textureSpeed. Beams have no time factor,
-	so TextureSpeed is multiplied by the effect time scale (slow motion slows the texture scroll).
+	so TextureSpeed = textureSpeed × s, s = the effect's effective time scale: the definition's timeScale at build
+	time, then whatever the Player passes to setTimeScale (definition × Play option × handle:SetTimeScale, 0
+	while paused). Slow motion slows the texture scroll, fast motion speeds it up, a pause stops it. Written only
+	when the value changes; reset() restores the build value.
 
 	Segments = max(segments, gradient keypoints − 1), at most 1000: a Color/Transparency sequence with n keypoints
 	needs at least n − 1 segments (engine fact, research §2.6). `segments` is NOT quality-scaled
@@ -40,6 +43,11 @@ local channel = Common.channel
 
 local WHITE = Color3.new(1, 1, 1)
 local EPSILON = 1e-6
+local INF = math.huge
+
+local function isFinite(x: any): boolean
+	return type(x) == "number" and x == x and x ~= INF and x ~= -INF
+end
 
 -- Attachment CFrames (relative to the Root part) for a beam from `from` to `to` in component space.
 local function attachmentFrames(
@@ -278,7 +286,7 @@ local descriptor: Types.ComponentDescriptor = {
 	supportsViewport = false,
 	build = function(ctx: Types.BuildContext, component: CompiledComponent): Types.ComponentInstance
 		local props = component.props
-		local effectTimeScale: number = math.max(ctx.effect.timeScale, 0)
+		local builtTimeScale: number = if isFinite(ctx.effect.timeScale) then math.max(ctx.effect.timeScale, 0) else 1
 		local curveDirection: Vector3 = props.curveDirection
 		local roll: number = props.roll
 		local baseFrom: Vector3 = props.from
@@ -313,7 +321,8 @@ local descriptor: Types.ComponentDescriptor = {
 		beam.Segments = segmentCount(props.segments, baseColor, baseTransparency)
 		beam.TextureLength = props.textureLength
 		beam.TextureMode = props.textureMode
-		beam.TextureSpeed = baseTextureSpeed * effectTimeScale
+		local builtTextureSpeed = baseTextureSpeed * builtTimeScale
+		beam.TextureSpeed = builtTextureSpeed
 		beam.FaceCamera = props.faceCamera
 		beam.LightEmission = props.lightEmission
 		beam.LightInfluence = props.lightInfluence
@@ -337,6 +346,8 @@ local descriptor: Types.ComponentDescriptor = {
 		local tint = WHITE
 		local brightness = baseBrightness
 		local textureSpeed = baseTextureSpeed
+		local effectTimeScale = builtTimeScale
+		local writtenTextureSpeed = builtTextureSpeed
 		local localCFrame = CFrame.new()
 		local lastA0 = builtA0
 		local lastA1 = builtA1
@@ -358,6 +369,15 @@ local descriptor: Types.ComponentDescriptor = {
 			if cf1 ~= lastA1 then
 				lastA1 = cf1
 				a1.CFrame = cf1
+			end
+		end
+
+		-- Beam.TextureSpeed = authored × effect time scale, written only when it changes.
+		local function writeTextureSpeed()
+			local v = textureSpeed * effectTimeScale
+			if v ~= writtenTextureSpeed then
+				writtenTextureSpeed = v
+				beam.TextureSpeed = v
 			end
 		end
 
@@ -441,7 +461,7 @@ local descriptor: Types.ComponentDescriptor = {
 			elseif name == "textureSpeed" then
 				if isNumber and value ~= textureSpeed then
 					textureSpeed = value
-					beam.TextureSpeed = value * effectTimeScale
+					writeTextureSpeed()
 				end
 			end
 		end
@@ -460,6 +480,13 @@ local descriptor: Types.ComponentDescriptor = {
 			elseif action.action == "disable" then
 				enabledByEvent = false
 				refreshEnabled()
+			end
+		end
+
+		function controller.setTimeScale(_self, scale: number)
+			if isFinite(scale) and scale >= 0 and scale ~= effectTimeScale then
+				effectTimeScale = scale
+				writeTextureSpeed()
 			end
 		end
 
@@ -490,7 +517,9 @@ local descriptor: Types.ComponentDescriptor = {
 			brightness = baseBrightness
 			beam.Brightness = baseBrightness
 			textureSpeed = baseTextureSpeed
-			beam.TextureSpeed = baseTextureSpeed * effectTimeScale
+			effectTimeScale = builtTimeScale
+			writtenTextureSpeed = builtTextureSpeed
+			beam.TextureSpeed = builtTextureSpeed
 			from = baseFrom
 			to = baseTo
 			localCFrame = CFrame.new()

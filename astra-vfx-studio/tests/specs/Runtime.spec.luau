@@ -467,7 +467,10 @@ return function(T: any, use: (string) -> any, ctx: any)
 			handle.Finished:Connect(function(reason: string)
 				table.insert(reasons, reason)
 			end)
+			-- the stop linger follows the rate: particles age at TimeScale 0.5, so the 0.3 s lifetime lasts 0.6 s
 			frames(30)
+			expect(reasons).toEqual({})
+			frames(10)
 			expect(reasons).toEqual({ "finished" })
 			expect(AstraVFX.ActiveCount()).toBe(0)
 		end)
@@ -564,6 +567,173 @@ return function(T: any, use: (string) -> any, ctx: any)
 			expect(function()
 				AstraVFX.SetUpdateEvent("Stepped" :: any)
 			end).toThrow("Heartbeat")
+		end)
+	end)
+
+	T.describe("AstraVFX.SetMaxActive", function()
+		local function auraDef(): any
+			local def = simpleDef()
+			def.id = "aura"
+			def.name = "Aura"
+			def.loop = true
+			return def
+		end
+
+		-- Runs fn with the runtime's warn() captured (Lune: modules read globals through ctx.loader.globals).
+		local function captureWarnings(fn: () -> ()): { string }
+			local globals = ctx.loader.globals
+			local original = globals.warn
+			local out: { string } = {}
+			globals.warn = function(...: any)
+				local parts = {}
+				for i = 1, select("#", ...) do
+					table.insert(parts, tostring((select(i, ...))))
+				end
+				table.insert(out, table.concat(parts, " "))
+			end
+			local ok, err = pcall(fn :: any)
+			globals.warn = original
+			if not ok then
+				error(err, 0)
+			end
+			return out
+		end
+
+		T.it("defaults to 64, accepts whole numbers >= 1 or math.huge and resets with _reset", function()
+			expect(AstraVFX.GetMaxActive()).toBe(64)
+			AstraVFX.SetMaxActive(3)
+			expect(AstraVFX.GetMaxActive()).toBe(3)
+			AstraVFX.SetMaxActive(math.huge)
+			expect(AstraVFX.GetMaxActive()).toBe(math.huge)
+			for _, bad in { 0, -1, 1.5, 0 / 0, -math.huge, "8" :: any } do
+				expect(function()
+					AstraVFX.SetMaxActive(bad)
+				end).toThrow("SetMaxActive")
+			end
+			AstraVFX._reset()
+			expect(AstraVFX.GetMaxActive()).toBe(64)
+		end)
+
+		T.itIf(isLune, "a Play beyond the cap stops the oldest non-looping effect gracefully", function()
+			AstraVFX.Register(simpleDef())
+			AstraVFX.Register(auraDef())
+			AstraVFX.SetMaxActive(3)
+			local parent = H:folder("Parent")
+			local aura = AstraVFX.Play("Aura", { Parent = parent }) -- the oldest, but looping
+			local first = AstraVFX.Play("Simple", { Parent = parent, Autoplay = false }) -- paused effects count
+			local second = AstraVFX.Play("Simple", { Parent = parent })
+			frames(2)
+			local warnings = captureWarnings(function()
+				local third = AstraVFX.Play("Simple", { Parent = parent })
+				expect(third:GetState()).toBe("playing")
+			end)
+			expect(warnings).toEqual({}) -- making room is normal operation, not a problem
+			expect(first:GetState()).toBe("stopping") -- Stop(): emission ends, live particles finish
+			expect(second:GetState()).toBe("playing")
+			expect(aura:GetState()).toBe("playing")
+			-- stopping effects linger for their tail but no longer count against the cap
+			local fourth = AstraVFX.Play("Simple", { Parent = parent })
+			expect(second:GetState()).toBe("stopping")
+			expect(fourth:GetState()).toBe("playing")
+			expect(AstraVFX.ActiveCount()).toBe(5) -- ActiveCount still includes the two lingering effects
+			frames(30) -- the 0.3 s tails end
+			expect(first:GetState()).toBe("finished")
+			expect(second:GetState()).toBe("finished")
+			expect(AstraVFX.ActiveCount()).toBe(3)
+			AstraVFX.StopAll(true)
+		end)
+
+		T.itIf(
+			isLune,
+			"when every counted effect loops, Play is refused with a warning (TryPlay: nil, 'limit')",
+			function()
+				AstraVFX.Register(simpleDef())
+				AstraVFX.Register(auraDef())
+				AstraVFX.SetMaxActive(2)
+				local parent = H:folder("Parent")
+				local a = AstraVFX.Play("Aura", { Parent = parent })
+				local b = AstraVFX.Play("Aura", { Parent = parent, Loop = true })
+				local tried: any, err: any, played: any = nil, nil, nil
+				local warnings = captureWarnings(function()
+					tried, err = AstraVFX.TryPlay("Simple", { Parent = parent })
+					played = AstraVFX.Play("Simple", { Parent = parent })
+				end)
+				expect(tried).toBeNil()
+				expect(err).toBe("limit")
+				expect(played).toBeNil()
+				expect(#warnings).toBe(2)
+				expect(warnings[1]).toContain("2 active effects")
+				expect(warnings[1]).toContain("Simple")
+				expect(AstraVFX.ActiveCount()).toBe(2)
+				expect(#parent:GetChildren()).toBe(2) -- nothing was built for the refused plays
+				-- SetLoop(false) makes an effect a candidate again; a stopped effect frees its slot
+				a:SetLoop(false)
+				local c = AstraVFX.Play("Simple", { Parent = parent })
+				expect(c).never.toBeNil()
+				expect(a:GetState()).toBe("stopping")
+				b:Stop()
+				local d, noErr = AstraVFX.TryPlay("Aura", { Parent = parent })
+				expect(d).never.toBeNil()
+				expect(noErr).toBeNil()
+				-- unlimited
+				AstraVFX.SetMaxActive(math.huge)
+				for _ = 1, 3 do
+					expect(AstraVFX.Play("Aura", { Parent = parent })).never.toBeNil()
+				end
+				AstraVFX.StopAll(true)
+			end
+		)
+
+		T.itIf(
+			isLune,
+			"a lowered cap takes effect with the next Play, which stops as many old effects as needed",
+			function()
+				AstraVFX.Register(simpleDef())
+				local parent = H:folder("Parent")
+				local handles = {}
+				for i = 1, 4 do
+					handles[i] = AstraVFX.Play("Simple", { Parent = parent })
+				end
+				AstraVFX.SetMaxActive(2)
+				for _, handle in handles do
+					expect(handle:GetState()).toBe("playing")
+				end
+				-- the next Play stops the oldest effects until it fits: 4 counted -> 1 + the new one
+				local newest = AstraVFX.Play("Simple", { Parent = parent })
+				expect(handles[1]:GetState()).toBe("stopping")
+				expect(handles[2]:GetState()).toBe("stopping")
+				expect(handles[3]:GetState()).toBe("stopping")
+				expect(handles[4]:GetState()).toBe("playing")
+				expect(newest:GetState()).toBe("playing")
+				AstraVFX.StopAll(true)
+			end
+		)
+
+		T.itIf(isLune, "a Play that fails or is invalid stops nothing, even when the cap is full", function()
+			AstraVFX.Register(simpleDef())
+			AstraVFX.Register(auraDef())
+			AstraVFX.SetMaxActive(1)
+			local parent = H:folder("Parent")
+			local first = AstraVFX.Play("Simple", { Parent = parent })
+			-- the palette colour is only checked by the Compiler, after the cap made room
+			local failed, err = AstraVFX.TryPlay("Simple", { Parent = parent, Palette = { primary = 5 :: any } })
+			expect(failed).toBeNil()
+			expect(err).toContain("palette")
+			expect(first:GetState()).toBe("playing") -- not stopped for a play that never started
+			expect(AstraVFX.ActiveCount()).toBe(1)
+			-- name and option errors come before the cap: they raise instead of reporting "limit"
+			first:Stop(0)
+			local aura = AstraVFX.Play("Aura", { Parent = parent })
+			expect(function()
+				AstraVFX.Play("Simple", { Parent = parent, Foo = true } :: any)
+			end).toThrow("unknown option")
+			expect(function()
+				AstraVFX.Play("Missing", { Parent = parent })
+			end).toThrow("unknown effect")
+			local _, limit = AstraVFX.TryPlay("Simple", { Parent = parent })
+			expect(limit).toBe("limit")
+			expect(aura:GetState()).toBe("playing")
+			AstraVFX.StopAll(true)
 		end)
 	end)
 end

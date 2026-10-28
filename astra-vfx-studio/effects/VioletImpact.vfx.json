@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "violetimpact",
+  "name": "VioletImpact",
+  "duration": 2.5,
+  "components": [
+    {
+      "id": "core",
+      "name": "core",
+      "type": "sphere",
+      "duration": 1.2,
+      "startTime": 0,
+      "properties": {
+        "coreColor": "#9641FF",
+        "shellColor": "#9641FF"
+      },
+      "tracks": [
+        {
+          "id": "scale",
+          "channel": "scale",
+          "keyframes": [
+            {
+              "time": 0,
+              "value": 1
+            },
+            {
+              "time": 1.2,
+              "value": 8
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -330,6 +330,30 @@ return function(T: any, use: (string) -> any, ctx: any)
 			end
 		)
 
+		T.itIf(isLune, "counts a play refused by the active-effect cap as ignored and warns only once", function()
+			local aura = effectDef()
+			aura.id = "aura"
+			aura.name = "Aura"
+			aura.loop = true
+			AstraVFX.Register(aura)
+			AstraVFX.SetMaxActive(1)
+			local running = AstraVFX.Play("Aura")
+			local globals = ctx.loader.globals
+			local original = globals.warn
+			local warnings = 0
+			globals.warn = function()
+				warnings += 1
+			end
+			local ok, result = pcall(Net._handle, { name = "Zap", position = Vector3.new(0, 4, 0) })
+			globals.warn = original
+			expect(ok).toBe(true)
+			expect(result).toBeNil()
+			expect(warnings).toBe(1) -- the runtime's refusal warning; Net does not repeat it
+			expect(Net.stats).toEqual({ received = 1, played = 0, ignored = 1 })
+			running:Destroy()
+			AstraVFX.SetMaxActive(AstraVFX.DEFAULT_MAX_ACTIVE)
+		end)
+
 		T.itIf(isLune, "plays at the sent CFrame when the attach target did not stream in", function()
 			local handle = Net._handle({ name = "Zap", cframe = CFrame.new(10, 0, 0), attach = nil })
 			expect(handle).never.toBeNil()

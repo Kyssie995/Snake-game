@@ -10,6 +10,7 @@
 	every ModuleScript named "*.spec" under Tests.Specs with tests/framework/TestFramework.luau.
 ]]
 
+local fs = require("@lune/fs")
 local process = require("@lune/process")
 local stdio = require("@lune/stdio")
 
@@ -58,9 +59,14 @@ table.sort(specs, function(a, b)
 	return a.name < b.name
 end)
 
+-- Lune only: reads a repository file (path relative to the project directory), e.g. tests/fixtures/*.json.
+local function readFile(path: string): string
+	return fs.readFile(process.cwd .. "/" .. path)
+end
+
 local report = TestFramework.run(specs, function(path: string)
 	return loader:use(path)
-end, { environment = "lune", fakes = fakes, loader = loader, plugin = PluginFakes }, filter)
+end, { environment = "lune", fakes = fakes, loader = loader, plugin = PluginFakes, readFile = readFile }, filter)
 
 local text = TestFramework.format(report, verbose)
 if report.failed > 0 then

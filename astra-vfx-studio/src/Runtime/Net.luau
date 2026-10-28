@@ -39,6 +39,9 @@
 	ignored (counted in Net.stats.ignored, never an error). scale is clamped to [0.05, 20], timeScale to
 	[0.05, 10]. Unknown payload keys are ignored (forward compatibility).
 
+	A play the client's active-effect cap refuses (AstraVFX.SetMaxActive: every counted effect loops) is counted in
+	Net.stats.ignored; the runtime has warned about it already.
+
 	Test hooks: Net._encode(name, options?) -> (payload, unreliable), Net._decode(payload) -> (name?, options?,
 	reason?), Net._validate(payload) (decode + registry check), Net._handle(payload) -> Handle? (what the client
 	listener does), Net._playersNear(position, radius, players) (pure filter, works with fake player tables),
@@ -349,7 +352,9 @@ function Net._handle(payload: any): any
 	local handle, err = api().TryPlay(name, options)
 	if handle == nil then
 		Net.stats.ignored += 1
-		warn("[AstraVFX] Net: could not play " .. name .. ": " .. tostring(err))
+		if err ~= "limit" then -- the active-effect cap warned already (AstraVFX.SetMaxActive)
+			warn("[AstraVFX] Net: could not play " .. name .. ": " .. tostring(err))
+		end
 		return nil
 	end
 	Net.stats.played += 1

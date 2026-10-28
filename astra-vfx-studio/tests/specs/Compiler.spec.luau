@@ -458,6 +458,54 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			expect(ids(Compiler.compile(def, { quality = "Low" }))).toEqual({ "g" })
 		end)
 
+		T.it("counts the built-in PointLights of flash / sphere against maxLights and switches them off", function()
+			local def = effect({
+				{ id = "f1", name = "F1", type = "flash" },
+				{ id = "f2", name = "F2", type = "flash" },
+				{ id = "f3", name = "F3", type = "flash" },
+				{ id = "l1", name = "L1", type = "light" },
+			})
+			-- Low allows 2 lights: f1 and f2 keep theirs, f3 is built without one, the light component is dropped
+			local low = Compiler.compile(def, { quality = "Low" })
+			expect(ids(low)).toEqual({ "f1", "f2", "f3" })
+			expect(low.byId.f1.props.light).toBe(true)
+			expect(low.byId.f2.props.light).toBe(true)
+			expect(low.byId.f3.props.light).toBe(false)
+			-- the descriptors' cost estimates agree: exactly maxLights lights remain
+			local total = 0
+			for _, c in low.components do
+				total += Components.get(c.type).estimateCost(c, low.quality).lights
+			end
+			expect(total).toBe(2)
+			-- Medium (4 lights): everything fits
+			local medium = Compiler.compile(def, { quality = "Medium" })
+			expect(ids(medium)).toEqual({ "f1", "f2", "f3", "l1" })
+			expect(medium.byId.f3.props.light).toBe(true)
+
+			-- components whose light is off use no budget; sphere lights count the same way, in component order
+			local mixed = effect({
+				{ id = "dark", name = "Dark", type = "flash", properties = { light = false } },
+				{ id = "orb", name = "Orb", type = "sphere" },
+				{ id = "l1", name = "L1", type = "light" },
+				{ id = "orb2", name = "Orb2", type = "sphere", qualityOverrides = { Low = { light = true } } },
+				{ id = "l2", name = "L2", type = "light" },
+			})
+			local m = Compiler.compile(mixed, { quality = "Low" })
+			expect(ids(m)).toEqual({ "dark", "orb", "l1", "orb2" })
+			expect(m.byId.dark.props.light).toBe(false)
+			expect(m.byId.orb.props.light).toBe(true)
+			expect(m.byId.orb2.props.light).toBe(false) -- the budget is a hard cap, overrides included
+			-- maxLights 0 switches every built-in light off and drops every light component
+			mixed.quality = { Low = { maxLights = 0 } }
+			local none = Compiler.compile(mixed, { quality = "Low" })
+			expect(ids(none)).toEqual({ "dark", "orb", "orb2" })
+			expect(none.byId.orb.props.light).toBe(false)
+			-- High is unlimited
+			local high = Compiler.compile(mixed, { quality = "High" })
+			expect(#high.components).toBe(5)
+			expect(high.byId.orb2.props.light).toBe(true)
+		end)
+
 		T.it("accepts a QualityProfile and merges the definition's quality overrides", function()
 			local def = effect({ { id = "p", name = "P", type = "particles", properties = { rate = 100 } } })
 			local profile = Quality.resolve("High")

@@ -28,7 +28,10 @@ selene src tests/framework tests/specs tools     # Lint
 stylua src tests tools                           # formatieren
 rojo build default.project.json -o build/AstraVFXStudio.rbxmx   # Plugin bauen
 rojo build runtime.project.json -o build/AstraVFX.rbxm          # Runtime-Paket bauen
+rojo build examples/default.project.json -o build/AstraVFX-Examples.rbxl   # Beispiel-Place (examples/README.md)
 ```
+
+Spiel-API: `docs/RUNTIME_API.md`. Automatische Tests vs. manuelles Studio-Protokoll: `docs/TESTING.md`.
 
 In dieser Entwicklungsumgebung liegen `astra-analyze` unter `/root/tools/bin/astra-analyze` und die Roblox-Definitionen
 unter `/root/tools/ref/globalTypes.d.luau` (luau-lsp, Engine 0.745); der lokale API-Dump unter
@@ -44,6 +47,9 @@ unter `/root/tools/ref/globalTypes.d.luau` (luau-lsp, Engine 0.745); der lokale 
   `UnbindFromRenderStep` werden in `fakes.renderBindings` und `fakes.renderLog` protokolliert, `fakes:renderStep(dt)`
   führt die Bindungen nach Priorität aus (`fakes:step` ebenfalls). Tests, die Fakes brauchen, mit
   `T.itIf(ctx.environment == "lune", …)` markieren.
+* `ctx.readFile(path)` (nur Lune) liest eine Repository-Datei relativ zum Projektordner (z. B.
+  `tests/fixtures/*.json`, `effects/*.vfx.json`). Ein anderes Rojo-Projekt als eigenen Instanzbaum lädt
+  `ctx.loader.new(ctx.loader.projectDir .. "/examples", "default.project.json")` (siehe `Examples.spec.luau`).
 * `Players.LocalPlayer` lässt sich in Lune nicht faken; Clients/Server simuliert man mit
   `Env.override("Players", { LocalPlayer = … })` bzw. `{}`. Lunes Workspace hat eine Standard-`CurrentCamera`, und
   `CurrentCamera = nil` lehnt Lune ab – Kameras deshalb über `Env.override("Workspace", { CurrentCamera = … })`.

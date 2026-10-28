@@ -652,7 +652,37 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			T.expect(codes(setProp)).toEqual({ "graph.param_ref", "graph.channel_unverified" })
 		end)
 
+		T.it("accepts SetEnabled on every type the Player switches (declared events or activation)", function()
+			-- the Player routes enable/disable to types that declare them (particles, beam, trail, light) and
+			-- switches every other type off / on through its activation (MODULE_CONTRACTS §11)
+			local def = makeDef()
+			for _, extra in
+				{
+					{ id = "core", name = "Core", type = "part" },
+					{ id = "orb", name = "Orb", type = "sphere" },
+					{ id = "pop", name = "Pop", type = "flash" },
+					{ id = "wave", name = "Wave", type = "shockwave" },
+					{ id = "glow", name = "Glow", type = "light" },
+				} :: { any }
+			do
+				table.insert(def.components, extra)
+			end
+			for _, target in { "core", "orb", "pop", "wave", "glow", "fx", "snd", "bolt" } do
+				for _, enabled in { true, false } do
+					local diags = Graph.validate(
+						G(
+							{ N("p", "OnPlay"), N("s", "SetEnabled", { target = target, enabled = enabled }) },
+							{ L("p.out", "s.in") }
+						),
+						def
+					)
+					T.expect(codes(diags)).toEqual({})
+				end
+			end
+		end)
+
 		T.it("warns when the target type does not handle the action", function()
+			-- a group has no visuals of its own and SetEnabled does not reach its children
 			local diags = Graph.validate(
 				G({ N("p", "OnPlay"), N("s", "SetEnabled", { target = "g1" }) }, { L("p.out", "s.in") }),
 				DEF
@@ -660,6 +690,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			T.expect(codes(diags)).toEqual({ "graph.action_unsupported" })
 			T.expect(diags[1].severity).toBe("warning")
 			T.expect(diags[1].componentId).toBe("g1")
+			T.expect(diags[1].message).toContain("children")
 			-- unregistered types are not second-guessed
 			T.expect(
 				Graph.validate(

@@ -23,9 +23,14 @@
 	     the ready component with the smallest definition index comes next, so a definition that lists parents
 	     first keeps its order exactly). depth = 0 for roots, parent depth + 1 below.
 	  4. Filter, walking that order: a component is built when its type is registered, enabled ~= false,
-	     Quality.includes(level, minQuality) and its parent (if any) is built. Light components are counted in
-	     the same walk (only lights that would be built count); lights beyond quality.maxLights are dropped
-	     together with their descendants.
+	     Quality.includes(level, minQuality) and its parent (if any) is built.
+	     Light budget (quality.maxLights; skipped when unlimited): in the same order, once step 5 compiled a
+	     component's props, its lights are counted with its descriptor's estimateCost(component, quality).lights
+	     — `light` components and the built-in PointLight of `sphere` / `flash` (props.light). A component whose
+	     lights no longer fit is built without them when its descriptor declares a boolean property `light`
+	     (props.light becomes false), otherwise it is dropped together with its descendants (`light`
+	     components). The budget is a hard cap: a qualityOverrides value light = true is switched off the same
+	     way.
 	  5. Per component:
 	     * props: for every PropertySpec of the descriptor the JSON value is qualityOverrides[level][name], else
 	       properties[name], else spec.default, decoded with Codec.decode(kind, value, spec, palette) (clamped
@@ -249,8 +254,6 @@ local function orderAndFilter(def: EffectDefinition, quality: QualityProfile, di
 	end
 
 	local level: QualityLevel = quality.level
-	local maxLights = quality.maxLights
-	local lights = 0
 	local built: { [number]: boolean } = {}
 	local depthOf: { [number]: number } = {}
 	local out: { Placed } = {}
@@ -294,10 +297,6 @@ local function orderAndFilter(def: EffectDefinition, quality: QualityProfile, di
 		end
 		if keep and p ~= nil then
 			keep = built[p] == true
-		end
-		if keep and c.type == "light" then
-			lights += 1
-			keep = lights <= maxLights
 		end
 		if keep then
 			built[i] = true
@@ -565,6 +564,38 @@ local function compileComponent(env: Env, placed: Placed): CompiledComponent
 	return compiled
 end
 
+-- Lights the descriptor's cost estimate counts for a compiled component.
+local function lightCount(
+	descriptor: Types.ComponentDescriptor,
+	component: CompiledComponent,
+	quality: QualityProfile
+): number
+	local n: any = descriptor.estimateCost(component, quality).lights
+	return if isFinite(n) and n > 0 then n else 0
+end
+
+-- Light budget (header step 4): (fits, lights used afterwards). May switch props.light off.
+local function fitLights(
+	descriptor: Types.ComponentDescriptor,
+	component: CompiledComponent,
+	quality: QualityProfile,
+	used: number
+): (boolean, number)
+	local n = lightCount(descriptor, component, quality)
+	if n == 0 or used + n <= quality.maxLights then
+		return true, used + n
+	end
+	local spec = Components.propertySpec(component.type, "light")
+	if spec ~= nil and spec.kind == "boolean" and component.props.light == true then
+		component.props.light = false
+		n = lightCount(descriptor, component, quality)
+		if n == 0 or used + n <= quality.maxLights then
+			return true, used + n
+		end
+	end
+	return false, used
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Schedule
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -643,11 +674,27 @@ function Compiler.compile(def: EffectDefinition, options: CompileOptions?): (Com
 	local components: { CompiledComponent } = {}
 	local byId: { [string]: CompiledComponent } = {}
 	local maxTail = 0
+	local budgeted = quality.maxLights ~= INF
+	local lights = 0
+	local dropped: { [string]: boolean } = {}
 	for _, placed in orderAndFilter(def, quality, diagnostics) do
+		local parentId = placed.parentId
+		if parentId ~= nil and dropped[parentId] then
+			dropped[placed.def.id] = true -- descendants of a component dropped by the light budget
+			continue
+		end
 		local component = compileComponent(env, placed)
+		local descriptor = Components.get(component.type) :: Types.ComponentDescriptor
+		if budgeted then
+			local fits
+			fits, lights = fitLights(descriptor, component, quality, lights)
+			if not fits then
+				dropped[component.id] = true
+				continue
+			end
+		end
 		table.insert(components, component)
 		byId[component.id] = component
-		local descriptor = Components.get(component.type) :: Types.ComponentDescriptor
 		local tailTime = descriptor.tailTime
 		if tailTime then
 			local tail = tailTime(component)
