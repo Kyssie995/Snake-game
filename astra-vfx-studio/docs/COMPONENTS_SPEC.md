@@ -457,7 +457,8 @@ offsets would accumulate otherwise), restoring base at deactivation/destroy.
 Channels: `position`, `amplitude`. `supportsViewport = false`. Cost: 0 instances, propertyUpdates 1 while active.
 
 **Implementation notes** (`src/Runtime/Core/Components/CameraShake.luau`, specs in
-`tests/specs/ComponentsCamera.spec.luau`; deviations from the text above are marked ⚑):
+`tests/specs/ComponentsCamera.spec.luau`, end to end through `AstraVFX.Play` on a simulated client and a server in
+`tests/specs/ComponentsCameraRuntime.spec.luau`; deviations from the text above are marked ⚑):
 
 * Envelope (S = span): `min(rise, fall)` clamped to 0..1, `rise = min(t / attack, 1)` (attack 0 → 1),
   `fall = 1 − decayEasing(p)` with `p = (t − (S − decay)) / decay` during the last `decay` seconds; 0 for t < 0 and
@@ -471,6 +472,10 @@ Channels: `position`, `amplitude`. `supportsViewport = false`. Cost: 0 instances
 * `amplitude` channel = rotation amplitude in degrees (rest value = the property, clamped 0..20); positionAmplitude
   is not animated. `transform.scale` multiplies positionAmplitude and both radii (Compiler already applied the effect
   scale). The distance is measured from the camera's unshaken CFrame.
+* Strength `s = envelope × falloff` is used only when `s > 0`; anything else — including NaN from a non-finite world
+  position (an Attach target flung by physics) — is "no offset", so `Camera.CFrame` never becomes NaN (a NaN camera
+  never equals the last write, the undo step could not repair it and the camera scripts would keep reading a NaN
+  LookVector).
 * ⚑ Undo step: besides the apply step at `Camera.Value + 1`, an undo step at `Camera.Value − 1` puts the unshaken
   CFrame back before the camera scripts run (only if `Camera.CFrame` still holds ASTRA's last write). Reason: the
   default PlayerModule cameras derive the next look direction from `Camera.CFrame.LookVector` (ASSUMPTION, from the
@@ -485,8 +490,13 @@ Channels: `position`, `amplitude`. `supportsViewport = false`. Cost: 0 instances
   first client shake activates, unbound (camera restored) when the last one deactivates / is released / reset /
   destroyed. Preview shakes use a second mixer without bindings.
 * Preview: the base is captured at activation; if the author moves the Studio camera during the preview
-  (`Camera.CFrame` no longer equals the last write) the new CFrame becomes the base instead of being snapped back,
-  and deactivation does not overwrite the author's camera. A changed `CurrentCamera` restores the old camera first.
+  (`Camera.CFrame` no longer equals the last write) the moved CFrame without the last composed offset
+  (`current × offset⁻¹`) becomes the base instead of being snapped back, and deactivation does not overwrite the
+  author's camera. Taking the offset out matters if Studio's navigation moves relative to the CFrame the camera
+  shows (ASSUMPTION, unverified): adopting the shaken CFrame as-is would fold the offset into the base every frame
+  (spec "preview never accumulates the shake while the author moves the camera relative to it": 1.2 rad after 40
+  frames). For an absolute move the error is at most one offset, so it stays bounded in both models. A changed
+  `CurrentCamera` restores the old camera first.
 * After each write the value read back from `Camera.CFrame` is remembered (property storage may round — Lune's does),
   so "still holds the last write" compares like with like.
 
@@ -514,7 +524,7 @@ Channels: `tint`. `supportsViewport = false`. Cost: 1 instance (post effect), pr
 "post effect: full-screen pass".
 
 **Implementation notes** (`src/Runtime/Core/Components/ScreenFlash.luau`, specs in
-`tests/specs/ComponentsCamera.spec.luau`):
+`tests/specs/ComponentsCamera.spec.luau` and `tests/specs/ComponentsCameraRuntime.spec.luau`):
 
 * Envelope as `flash` (§10): e = t/A during the attack (A = 0: peak at once), 1 while holding, linear 1 → 0 over the
   decay, 0 otherwise. Brightness/Contrast/Saturation = value × e, TintColor = white + (tint − white) × e, so e = 0 is

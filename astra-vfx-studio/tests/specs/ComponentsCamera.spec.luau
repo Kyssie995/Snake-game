@@ -558,6 +558,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 		T.it("preview adopts an author's camera move as the new base instead of snapping back", function()
 			local t0 = 0.4
 			local expected = measure(BIG, t0)
+			local previous = measure(BIG, 0.3)
 			local h = harness()
 			local c = h:build("cameraShake", merge(BIG, { previewInStudio = true }), { isPreview = true })
 			c:setActive(true, frame(h, 0.3))
@@ -566,12 +567,46 @@ return function(T: any, use: (string) -> any, ctx: any)
 			camera.CFrame = CFrame.new(home.Position) * CFrame.Angles(0, 1, 0)
 			local moved = camera.CFrame
 			step(h, c, t0)
-			expectVector(offsetVector(moved), expected, "relative to the moved camera")
+			-- new base = the moved CFrame without the offset it was shaken by (see the relative-navigation spec)
+			local previousOffset = CFrame.new(previous[4], previous[5], previous[6])
+				* CFrame.fromOrientation(previous[1], previous[2], previous[3])
+			expectVector(offsetVector(moved * previousOffset:Inverse()), expected, "relative to the moved camera")
 			-- moved again right before deactivation: left where the author put it
 			camera.CFrame = CFrame.new(home.Position) * CFrame.Angles(0, -1, 0)
 			local last = camera.CFrame
 			c:setActive(false, frame(h, 0.5))
 			expect(camera.CFrame).toBe(last)
+		end)
+
+		-- Studio's edit camera may move relative to its current (shaken) CFrame while the author navigates. Adopting
+		-- that CFrame as the new base as-is would fold the shake offset into the base every frame (unbounded
+		-- drift); with the last offset taken out first, the error stays within one offset in either model.
+		T.it("preview never accumulates the shake while the author moves the camera relative to it", function()
+			local t0 = 0.4
+			local one = measure(BIG, t0)
+			local oneAngle = select(2, (CFrame.fromOrientation(one[1], one[2], one[3])):ToAxisAngle())
+			local onePosition = Vector3.new(one[4], one[5], one[6]).Magnitude
+			expect(oneAngle).toBeGreaterThan(0.02)
+			local h = harness()
+			local c = h:build("cameraShake", merge(BIG, { previewInStudio = true }), { isPreview = true })
+			c:setActive(true, frame(h, t0))
+			step(h, c, t0)
+			local turn = CFrame.Angles(0, 0.01, 0) * CFrame.new(0.05, 0, 0)
+			local frames = 40
+			for _ = 1, frames do
+				camera.CFrame = camera.CFrame * turn -- relative navigation from what the camera shows
+				step(h, c, t0) -- paused timeline: the same offset every frame
+			end
+			c:setActive(false, frame(h, t0))
+			-- where the author's moves alone would have taken the camera
+			local intended = home
+			for _ = 1, frames do
+				intended *= turn
+			end
+			local residual = intended:Inverse() * camera.CFrame
+			local _, angle = residual:ToAxisAngle()
+			expect(angle).toBeLessThan(2 * oneAngle)
+			expect(residual.Position.Magnitude).toBeLessThan(2 * onePosition + 2 * frames * 0.05 * oneAngle)
 		end)
 
 		T.it("preview restores the old camera and shakes the new one when CurrentCamera changes", function()
@@ -599,6 +634,42 @@ return function(T: any, use: (string) -> any, ctx: any)
 			c:setActive(true, frame(h, 0.3))
 			step(h, c, 0.3)
 			c:setActive(false, frame(h, 0.4))
+			c:destroy()
+			expect(camera.CFrame).toBe(home)
+		end)
+
+		-- A NaN world position (e.g. an Attach target flung by physics) must not reach Camera.CFrame: a NaN camera
+		-- never equals ASTRA's last write, so the undo step would leave it and the camera scripts would keep reading
+		-- a NaN LookVector.
+		local NON_FINITE = { Vector3.new(0 / 0, 0, 0), Vector3.new(math.huge, 0, 0), Vector3.new(1, -math.huge, 2) }
+
+		T.it("never writes a non-finite camera CFrame (preview, NaN / infinite component position)", function()
+			local h = harness()
+			local c = h:build("cameraShake", merge(BIG, { previewInStudio = true }), { isPreview = true })
+			c:setActive(true, frame(h, 0.3))
+			for i, bad in NON_FINITE do
+				step(h, c, 0.3 + i * 0.01, CFrame.new(bad))
+				expect(camera.CFrame).toBe(home)
+			end
+			step(h, c, 0.35) -- a finite position shakes again
+			expect(camera.CFrame ~= home).toBe(true)
+			c:destroy()
+			expect(camera.CFrame).toBe(home)
+		end)
+
+		T.itIf(isLune, "never writes a non-finite camera CFrame (client, NaN / infinite component position)", function()
+			asClient()
+			local h = harness()
+			local c = h:build("cameraShake", BIG)
+			c:setActive(true, frame(h, 0.3))
+			for i, bad in NON_FINITE do
+				step(h, c, 0.3 + i * 0.01, CFrame.new(bad))
+				local p = camera.CFrame.Position
+				expect(p == p).toBe(true) -- NaN ~= NaN
+				expect(camera.CFrame).toBe(home)
+			end
+			step(h, c, 0.35)
+			expect(camera.CFrame ~= home).toBe(true)
 			c:destroy()
 			expect(camera.CFrame).toBe(home)
 		end)

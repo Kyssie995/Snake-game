@@ -24,8 +24,12 @@
 	The fastest noise component runs at `frequency` itself (the other sines are slower wander).
 
 	Mixer. All active shakes of one kind (client / preview) share a module-level mixer that owns the camera writes:
-	  apply:   current = Camera.CFrame; base = remembered base if Camera.CFrame still holds the mixer's last write,
-	           else current; Camera.CFrame = base × offset₁ × offset₂ × … (shakes in activation order).
+	  apply:   current = Camera.CFrame; base = the remembered base if Camera.CFrame still holds the mixer's last
+	           write; current × (last offset)⁻¹ if someone else moved the camera since that write (Studio
+	           navigation may move relative to what the camera showed: taking the offset out keeps the error within
+	           one offset whether the mover was relative or absolute, instead of folding the shake into the base
+	           every frame); current when there is no write to compare with (the client's undo step cleared it).
+	           Camera.CFrame = base × offset₁ × offset₂ × … (shakes in activation order).
 	  restore: if Camera.CFrame still holds the mixer's last write, put the base back.
 	So concurrent shakes (several hits at once) compose instead of fighting over the camera, and offsets never
 	accumulate. Camera.CFrame is written only when the target differs; the value read back after a write is what
@@ -48,8 +52,8 @@
 	  * Preview (ctx.isPreview): only when previewInStudio is true and workspace.CurrentCamera exists. No bindings:
 	    the base is captured at activation and every update() re-applies base × offsets (Studio's edit camera is not
 	    driven by camera scripts). If the author moves the camera meanwhile (Camera.CFrame no longer holds the last
-	    write) the new CFrame becomes the base instead of being snapped back. When the last preview shake stops,
-	    the base is restored — again only while Camera.CFrame still holds the last write.
+	    write) the moved CFrame without the last offset becomes the base instead of being snapped back. When the
+	    last preview shake stops, the base is restored — only while Camera.CFrame still holds the last write.
 	  * Viewport builds: never (supportsViewport = false; the Builder uses a placeholder anyway).
 	The offset at a local time depends only on (t, seed, props, amplitude channel, distance) — scrubbing is exact.
 ]]
@@ -134,6 +138,7 @@ type Mixer = {
 	runService: any,
 	camera: Camera?, -- camera the mixer last wrote to
 	base: CFrame, -- that camera's CFrame without shake
+	offset: CFrame, -- the composed offset of the last write (base × offset = written)
 	written: CFrame?, -- the value it held after the mixer's last write
 	bound: boolean,
 	applyName: string,
@@ -152,6 +157,7 @@ local function newMixer(client: boolean): Mixer
 		runService = nil,
 		camera = nil,
 		base = CFrame.identity,
+		offset = CFrame.identity,
 		written = nil,
 		bound = false,
 		applyName = "",
@@ -182,7 +188,14 @@ local function apply(m: Mixer)
 	end
 	local current = camera.CFrame
 	local written = m.written
-	local base = if written ~= nil and current == written then m.base else current
+	local base: CFrame
+	if written == nil then
+		base = current
+	elseif current == written then
+		base = m.base
+	else
+		base = current * m.offset:Inverse()
+	end
 	local offset = CFrame.identity
 	for _, shaker in m.shakers do
 		offset *= shaker.offset(base.Position)
@@ -190,6 +203,7 @@ local function apply(m: Mixer)
 	local target = base * offset
 	m.camera = camera
 	m.base = base
+	m.offset = offset
 	if target ~= current then
 		camera.CFrame = target
 		m.written = camera.CFrame
@@ -428,7 +442,9 @@ local descriptor: Types.ComponentDescriptor = {
 				local t = localTime
 				local s = envelope(t, span, attack, decay, decayEase)
 					* falloff((cameraPosition - worldPosition).Magnitude, innerRadius, outerRadius)
-				if s <= 0 then
+				-- `not (s > 0)` also catches NaN (a NaN world position, e.g. an Attach target flung by physics):
+				-- a NaN Camera.CFrame would never equal the last write, so the undo step could not repair it.
+				if not (s > 0) then
 					return CFrame.identity
 				end
 				local u = t * frequency
