@@ -83,6 +83,20 @@ Fakes.newSignal = newSignal
 
 -- Per-instance signal storage (weak keys so destroyed instances do not leak across tests)
 local instanceSignals: { [any]: { [string]: FakeSignal } } = setmetatable({}, { __mode = "k" }) :: any
+-- Instances with at least one connected handler, held strongly. Lune drops an Instance's userdata wrapper when
+-- Luau no longer references it (the next access creates a new one), so the weak-keyed map above would lose the
+-- signals — and their handlers — of a live instance that only the tree references, at the next GC. Like the
+-- engine, a connection keeps working until it is disconnected.
+local pinned: { [any]: { [string]: FakeSignal } } = {}
+
+local function anyHandlers(map: { [string]: FakeSignal }): boolean
+	for _, signal in map do
+		if next(signal._handlers) ~= nil then
+			return true
+		end
+	end
+	return false
+end
 
 local function instanceSignal(inst: any, name: string): FakeSignal
 	local map = instanceSignals[inst]
@@ -93,6 +107,19 @@ local function instanceSignal(inst: any, name: string): FakeSignal
 	local s = map[name]
 	if not s then
 		s = newSignal(name)
+		local connect = s.Connect
+		s.Connect = function(self: FakeSignal, fn: (...any) -> ()): FakeConnection
+			pinned[inst] = map
+			local connection = connect(self, fn)
+			local disconnect = connection.Disconnect
+			connection.Disconnect = function(c: FakeConnection)
+				disconnect(c)
+				if pinned[inst] == map and not anyHandlers(map) then
+					pinned[inst] = nil
+				end
+			end
+			return connection
+		end
 		map[name] = s
 	end
 	return s
@@ -354,7 +381,9 @@ function Fakes.install(): Fakes
 			end)
 		end
 	end
-	local focused: { [any]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+	-- Strong keys: a weak entry would be dropped when Lune collects the TextBox's userdata wrapper (see `pinned`).
+	-- ReleaseFocus removes it.
+	local focused: { [any]: boolean } = {}
 	roblox.implementMethod("TextBox", "CaptureFocus", function(self)
 		focused[self] = true
 	end)

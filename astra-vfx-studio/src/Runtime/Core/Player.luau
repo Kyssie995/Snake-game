@@ -24,17 +24,21 @@
 
 	Frame (step while playing):
 	  1. Advance time. Loop (effect loop or setLoop(true), duration > 0): when the time reaches the duration, the
+	     components are evaluated at the duration first (like the last frame of a one-shot effect: spans that end
+	     deactivate, a span that lies inside this frame is still activated once so its burst is not lost), the
 	     remaining actions of the cycle (t_prev, duration] run, `cycle` increments, the schedule becomes
 	     Compiler.scheduleForCycle(compiled, cycle) (graph random values depend on the cycle), the time wraps and
 	     the cycle state is reset: every active component is deactivated (so it re-activates — bursts, sound
 	     playOnStart and trail clearOnStart happen every cycle), graph overrides and SetEnabled states are cleared,
 	     components disabled by a "disable" action get a synthetic "enable" (the authored state) and pending runtime
-	     actions move back by one duration. Runtime actions beyond the duration of a looping effect wait for the
-	     next cycle; at most 64 wraps happen per step.
+	     actions move back by one duration, and a tail that had started (setLoop toggled after the end) restarts.
+	     Runtime actions beyond the duration of a looping effect wait for the next cycle; at most 64 wraps happen
+	     per step (the cycles a long frame skips run their actions, without the end-of-cycle evaluation).
 	  2. Root CFrame = base × offset. base = the attach target's CFrame (BasePart.CFrame, Attachment.WorldCFrame —
 	     parent part CFrame × Attachment.CFrame where WorldCFrame is not readable, e.g. Lune —, Model:GetPivot())
 	     or the fixed cframe. A target that is no longer inside a WorldRoot (removed, destroyed, streamed out)
-	     keeps the last base and the effect keeps playing. The Root part moves only when the CFrame changed.
+	     keeps the last base and the effect keeps playing; a target that cannot be read any more (Lune raises on
+	     destroyed Instances) is dropped the same way. The Root part moves only when the CFrame changed.
 	  3. Components in topological order. Transform: position / rotation are the track value (or graph override)
 	     instead of the rest value; rotation += spin × max(localTime, 0) for components whose props.spin is a
 	     non-zero Vector3; local = parentLocal × CFrame.new(position) × CFrame.fromOrientation(rotation°);
@@ -59,8 +63,9 @@
 	       everything else -> controller:onAction(action, frame) of action.componentId
 	     A handler that calls seek / stop / destroy ends the action loop of that frame.
 	  5. One WorldRoot:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged) for every queued part
-	     (Root included). WorldRoot = the container's WorldRoot ancestor when it is not a Workspace (a WorldModel
-	     in viewport mode), else Env.getService("Workspace"); without either the CFrames are assigned directly.
+	     (Root included; a loop-wrap frame evaluates twice, so there each part is sent once, with its last
+	     CFrame). WorldRoot = the container's WorldRoot ancestor when it is not a Workspace (a WorldModel in
+	     viewport mode), else Env.getService("Workspace"); without either the CFrames are assigned directly.
 	  6. End (no loop): once time >= duration, the player waits for the tail and then finishes. Tail and stop
 	     linger are REAL seconds (particles and trails age in real time; emitters run at min(1, compiled
 	     timeScale)): tail = compiled.maxTail / clamp(compiled.timeScale, 0.1, 1).
@@ -94,6 +99,11 @@
 
 	Errors raised by controllers propagate (Core/Scheduler isolates failing players); onEvent errors are caught
 	and reported with warn().
+
+	User callbacks — options.onEvent and the handlers of finished / event / actionExecuted — run through
+	task.spawn: immediately and in order, so for handlers that do not yield nothing changes, but a handler that
+	yields (task.wait, WaitForChild, ...) suspends only its own thread. Called directly it would suspend the
+	Scheduler's frame, and every effect would freeze until it resumed.
 ]]
 
 local Builder = require(script.Parent.Builder)
@@ -195,6 +205,7 @@ type PlayerData = {
 	_stopElapsed: number,
 	_stopLinger: number,
 	_moves: number,
+	_dedupe: boolean,
 }
 
 local Player = {}
@@ -208,6 +219,7 @@ local INF = math.huge
 local MAX_WRAPS = 64
 local TAIL_MIN_RATE = 0.1
 local MAX_TIME_SCALE = Constants.MAX_TIME_SCALE
+local NO_ACTIONS: { ScheduledAction } = table.freeze({}) :: any
 
 Player.MAX_WRAPS = MAX_WRAPS
 
@@ -477,6 +489,7 @@ function Player.new(compiled: CompiledEffect, built: BuiltEffect, options: Playe
 		_stopElapsed = 0,
 		_stopLinger = 0,
 		_moves = 0,
+		_dedupe = false,
 	}, Player)
 	return self
 end
@@ -485,25 +498,40 @@ end
 -- Internals
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Calls options.onEvent; errors are reported with warn(), never raised.
+local function callOnEvent(onEvent: (name: string) -> (), name: string)
+	local ok, err = pcall(onEvent :: any, name)
+	if not ok then
+		warn("[AstraVFX] OnEvent handler error (" .. name .. "): " .. tostring(err))
+	end
+end
+
+-- Fires a signal whose handlers are user code in a thread of its own (see the header). Signal.Fire catches
+-- handler errors itself.
+local function dispatch(signal: Signal.Signal, ...: any)
+	if signal:count() > 0 then
+		task.spawn(signal.Fire :: any, signal, ...)
+	end
+end
+
 function Player._emitEvent(self: Player, name: string)
 	if type(name) ~= "string" or name == "" then
 		return
 	end
-	self.event:Fire(name)
+	dispatch(self.event, name)
 	local onEvent = self._onEvent
 	if onEvent then
-		local ok, err = pcall(onEvent :: any, name)
-		if not ok then
-			warn("[AstraVFX] OnEvent handler error (" .. name .. "): " .. tostring(err))
-		end
+		task.spawn(callOnEvent, onEvent, name)
 	end
 end
 
 function Player._resolveRoot(self: Player): CFrame
 	local target = self._attach
 	if target then
-		local cf = targetCFrame(target)
-		if cf then
+		local ok, cf = pcall(targetCFrame, target)
+		if not ok then
+			self._attach = nil -- cannot be read any more (Lune: destroyed): keep the last base
+		elseif cf then
 			self._base = cf
 		end
 	end
@@ -549,10 +577,35 @@ function Player._flush(self: Player)
 	local parts = frame.moveParts
 	local n = #parts
 	self._moves = n
+	local dedupe = self._dedupe
+	self._dedupe = false
 	if n == 0 then
 		return
 	end
 	local cframes = frame.moveCFrames
+	if dedupe then
+		-- a loop-wrap frame evaluates twice: send every part once, with its last CFrame
+		local index: { [BasePart]: number } = {}
+		local m = 0
+		for i = 1, n do
+			local part = parts[i]
+			local at = index[part]
+			if at then
+				cframes[at] = cframes[i]
+			else
+				m += 1
+				index[part] = m
+				parts[m] = part
+				cframes[m] = cframes[i]
+			end
+		end
+		for i = n, m + 1, -1 do
+			parts[i] = nil
+			cframes[i] = nil
+		end
+		n = m
+		self._moves = n
+	end
 	local world = self:_worldRoot()
 	if world ~= nil then
 		world:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged)
@@ -790,7 +843,7 @@ function Player._execute(self: Player, action: ScheduledAction, frame: FrameCont
 	else
 		self:_route(action, frame)
 	end
-	self.actionExecuted:Fire(action)
+	dispatch(self.actionExecuted, action)
 end
 
 -- Seek replay: state-changing actions only (no emission, no events).
@@ -809,9 +862,10 @@ function Player._runDue(self: Player, t0: number, t1: number, frame: FrameContex
 	self._includeStart = false
 	local schedule = self._schedule
 	local first, last = Timeline.range(schedule, t0, t1, includeStart)
-	local due: { ScheduledAction } = {}
+	local due = NO_ACTIONS
 	local runtime = self._runtime
 	if #runtime > 0 and runtime[1].time <= t1 then
+		due = {}
 		local keep: { ScheduledAction } = {}
 		for _, action in runtime do
 			if action.time <= t1 then
@@ -875,6 +929,7 @@ function Player._wrap(self: Player, frame: FrameContext)
 	for _, action in self._runtime do
 		action.time -= duration
 	end
+	self._tail = nil -- a tail that had started (setLoop(true) after the end) belongs to the old cycle
 	self._includeStart = true
 end
 
@@ -889,7 +944,7 @@ function Player._finish(self: Player)
 	if self._autoRelease then
 		self:_dispose()
 	end
-	self.finished:Fire("finished")
+	dispatch(self.finished, "finished")
 	if self._disposed then
 		self:_disconnect()
 	end
@@ -983,9 +1038,14 @@ function Player.step(self: Player, dt: number): boolean
 	local frame = self:_beginFrame(false)
 	frame.dt = scaled
 	if self._loop and duration > 0 and t >= duration then
+		-- the end of this cycle, like the last frame of a one-shot effect (header step 1)
 		self.time = duration
 		frame.time = duration
-		self:_runDue(prev, duration, frame)
+		self._dedupe = true
+		self:_evaluate("play", frame, prev, self._includeStart)
+		if self._epoch == epoch then
+			self:_runDue(prev, duration, frame)
+		end
 		local wraps = 0
 		while self._epoch == epoch and t >= duration and wraps < MAX_WRAPS do
 			t -= duration
@@ -1002,7 +1062,10 @@ function Player.step(self: Player, dt: number): boolean
 		prev = 0
 	end
 	if self._epoch ~= epoch then
-		self:_flush()
+		-- a handler stopped / seeked / destroyed the player during the end of the cycle
+		if not self._disposed then
+			self:_flush()
+		end
 		return self.state ~= "finished" and self.state ~= "destroyed"
 	end
 	local includeStart = self._includeStart
@@ -1133,7 +1196,7 @@ function Player.destroy(self: Player)
 	self._runtime = {}
 	self:_dispose()
 	if not wasFinished then
-		self.finished:Fire("destroyed")
+		dispatch(self.finished, "destroyed")
 	end
 	self:_disconnect()
 end

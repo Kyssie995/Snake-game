@@ -463,6 +463,24 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			def.components[3].properties.rate = 1000
 			expectDiag(V(def), "error", "property.range", "components[3].properties.rate")
 		end)
+
+		-- EndToEnd review: an unknown field was only a warning, so a NaN in it passed and Register then failed
+		-- while hashing the definition (Json.encode).
+		T.it("reports a non-JSON value in an unknown field as effect.json (only when nothing else failed)", function()
+			local def = baseDef()
+			def.components[2].properties.extra = 0 / 0
+			local result = V(def)
+			expectDiag(result, "error", "effect.json", "components[2].properties.extra")
+			T.expect(result.ok).toBe(false)
+			def.components[2].properties.extra = 1
+			T.expect(V(def).ok).toBe(true)
+			def.components[2].properties.extra = 0 / 0
+			def.duration = -1
+			local other = V(def)
+			for _, d in other.errors do
+				T.expect(d.code ~= "effect.json").toBe(true)
+			end
+		end)
 	end)
 
 	-- ── Effect fields ────────────────────────────────────────────────────────────────────────────────────

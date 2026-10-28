@@ -150,7 +150,7 @@ local SPEC: { [string]: TypeSpec } = {
 			P("width1", "number", 1, 0, 1000, "L"),
 			P("curveSize0", "number", 0, -1000, 1000, "L"),
 			P("curveSize1", "number", 0, -1000, 1000, "L"),
-			P("segments", "integer", 10, 1, 1000, "S"),
+			P("segments", "integer", 10, 1, 1000), -- no quality scaling (constraints K14)
 			P("textureLength", "number", 1, 0.01, 1000, "L"),
 			P("textureMode", "enum", "Stretch", nil, nil, nil, nil, "TextureMode"),
 			P("textureSpeed", "number", 1, -100, 100),

@@ -22,9 +22,11 @@
 	so TextureSpeed is multiplied by the effect time scale (slow motion slows the texture scroll).
 
 	Segments = max(segments, gradient keypoints − 1), at most 1000: a Color/Transparency sequence with n keypoints
-	needs at least n − 1 segments (engine fact, research §2.6). Validation can only check the authored value; the
-	Compiler's segment quality scaling (segmentScale 0.5 on Low) can push it below the gradient's needs, so the
-	floor is enforced here. Fade/tint rebuild the sequences with the same keypoint count, so the floor is fixed.
+	needs at least n − 1 segments (engine fact, research §2.6). `segments` is NOT quality-scaled
+	(docs/ROBLOX_API_CONSTRAINTS.md K14, ARCHITECTURE §5.4, COMPONENTS_SPEC §3: the engine lowers beam segments at
+	low graphics quality itself), but Validation can only check the authored value against the authored
+	sequences, so the floor is enforced here. Fade/tint rebuild the sequences with the same keypoint count, so the
+	floor is fixed.
 ]]
 
 local Common = require(script.Parent.Common)
@@ -69,7 +71,7 @@ end
 
 local MAX_SEGMENTS = 1000
 
--- Beam.Segments for the authored (quality-scaled) segment count: never below (gradient keypoints − 1).
+-- Beam.Segments for the authored segment count: never below (gradient keypoints − 1).
 local function segmentCount(segments: number, color: ColorSequence, transparency: NumberSequence): number
 	local gradient = math.max(#color.Keypoints, #transparency.Keypoints) - 1
 	return math.clamp(math.max(math.floor(segments + 0.5), gradient), 1, MAX_SEGMENTS)
@@ -164,7 +166,7 @@ local descriptor: Types.ComponentDescriptor = {
 			"integer",
 			10,
 			"Straight segments the curve is drawn with (at least keypoints - 1 for gradients).",
-			{ category = "Shape", min = 1, max = 1000, quality = "segments" }
+			{ category = "Shape", min = 1, max = 1000 } -- no quality scaling (K14)
 		),
 		prop(
 			"textureLength",

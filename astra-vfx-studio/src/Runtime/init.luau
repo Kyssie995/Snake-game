@@ -49,7 +49,8 @@
 	computed once per registration; at most 64 cached variants, the oldest is dropped together with its pooled
 	copies) -> a pooled copy (Core/Pool, key = cache key) or Builder.build -> Player.new + start ->
 	Scheduler.add. The copy goes back to the pool when the effect ends (finish, Stop, Destroy) as long as its cache
-	entry still exists; otherwise it is destroyed.
+	entry still exists and its container is still parented (a container removed from the outside — cleared
+	folder, destroyed parent — is never pooled); otherwise it is destroyed.
 
 	Handle: Stop(fade?), Destroy(), Pause(), Resume(), SetTimeScale(n), SetCFrame(cf), SetLoop(b), Seek(t),
 	Fire(name), GetTime(), GetState(), IsPlaying() (true until stopped / finished / destroyed, also while paused),
@@ -570,6 +571,16 @@ local function defaultParent(): Instance
 	return Env.getService("Workspace")
 end
 
+-- False when the copy's container was removed from the outside while it played (a cleared folder, a destroyed
+-- parent such as a respawned character — Roblox then locks Parent, so the pool could not reset / re-parent it):
+-- such a copy is destroyed instead of pooled. pcall: Lune raises on destroyed Instances.
+local function stillParented(built: BuiltEffect): boolean
+	local ok, parent = pcall(function(): Instance?
+		return built.container.Parent
+	end)
+	return ok and parent ~= nil
+end
+
 local function play(name: any, options: any): Handle
 	local o = checkPlayOptions("Play", options)
 	local entry = lookup(name)
@@ -606,7 +617,7 @@ local function play(name: any, options: any): Handle
 		loop = o.Loop,
 		onEvent = o.OnEvent,
 		release = function(b: BuiltEffect): boolean
-			return cache[key] ~= nil and Pool.release(key, b)
+			return cache[key] ~= nil and stillParented(b) and Pool.release(key, b)
 		end,
 	})
 	local handle: Handle = setmetatable({

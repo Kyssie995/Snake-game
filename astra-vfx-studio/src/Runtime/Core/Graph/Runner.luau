@@ -54,7 +54,10 @@
 	    channel value cannot be decoded for the channel's kind (no implicit conversions).
 	  * Channel values: decoded with Codec.decode against Components.channelSpec(target type, channel) (clamped
 	    to its min/max; colours resolve "$palette" keys through effect.palette, else the definition's palette).
-	    "length" channels are multiplied by effect.scale. With an unregistered target type the kind is inferred
+	    "length" channels are multiplied by effect.scale; number channels whose base property has quality =
+	    "count" (particles `rate`) get the Compiler's count rule with effect.quality.countScale (v × countScale,
+	    at least min(v, 1) when v > 0, clamped to the property range), so graph values share the compiled
+	    domain of the channel's tracks. With an unregistered target type the kind is inferred
 	    from the value (number, boolean, colour string, [x, y, z]). A missing value param means the kind's zero
 	    (0, [0, 0, 0], "#FFFFFF", false).
 	  * Limits: at most Constants.MAX_GRAPH_ACTIONS actions per run, a work budget (queued flows + node
@@ -803,6 +806,40 @@ local function channelValue(state: State, ctx: Context, node: CompiledNode, spec
 	return decoded
 end
 
+-- The Compiler's quality rule for number channels whose base property is a "count" (particles rate): tracks of
+-- such channels are compiled with it, so graph values must be too. Without an effect (no countScale) values stay
+-- as authored.
+local function countQuality(state: State, targetType: string?, spec: ChannelSpec?, value: any): any
+	local factor = state.countScale
+	if factor == nil or factor == 1 or type(value) ~= "number" or spec == nil or targetType == nil then
+		return value
+	end
+	local baseName = spec.baseProperty
+	local base = if baseName then Components.propertySpec(targetType, baseName) else nil
+	if base == nil or base.quality ~= "count" then
+		return value
+	end
+	local n: number
+	if base.kind == "integer" then
+		n = floor(value * factor + 0.5)
+		if value > 0 then
+			n = math.max(n, 1)
+		end
+	else
+		n = value * factor
+		if value > 0 then
+			n = math.max(n, math.min(value, 1))
+		end
+	end
+	if base.min ~= nil and n < base.min then
+		n = base.min
+	end
+	if base.max ~= nil and n > base.max then
+		n = base.max
+	end
+	return n
+end
+
 local function runAction(state: State, item: Item, node: CompiledNode)
 	local ctx = item.ctx
 	local t = item.time
@@ -860,7 +897,7 @@ local function runAction(state: State, item: Item, node: CompiledNode)
 		end
 		if target and type(channel) == "string" and channel ~= "" then
 			local spec = Components.channelSpec(targetType :: string, channel)
-			local value = channelValue(state, ctx, node, spec)
+			local value = countQuality(state, targetType, spec, channelValue(state, ctx, node, spec))
 			if value ~= nil then
 				local action: { [string]: any } = { componentId = target, channel = channel, value = value }
 				if kind == "Tween" then

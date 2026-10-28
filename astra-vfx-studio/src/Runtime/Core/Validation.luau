@@ -35,6 +35,10 @@
 	  warning  effect.empty            the effect has no components
 	  warning  effect.unknown_field    unknown top-level field ("$schema" is allowed) [error when strict]
 	  error    effect.internal         the validator itself failed on this part of the input (reported, not thrown)
+	  error    effect.json             a value that is not plain JSON (NaN, ±inf, a function, a mixed table, ...) where
+	                                   no specific check looks, e.g. in an unknown field, property or graph param:
+	                                   the definition could not be encoded (saved, exported, hashed by the runtime
+	                                   cache). Reported once, only when there is no other error.
 
 	  Components
 	  error    component.limit         more than MAX_COMPONENTS components
@@ -198,6 +202,7 @@ Validation.CODES = table.freeze({
 	code("effect.empty", "warning", "The effect has no components."),
 	code("effect.unknown_field", "warning", "Unknown top-level field (error when strict)."),
 	code("effect.internal", "error", "The validator failed on this part of the input."),
+	code("effect.json", "error", "A value somewhere (e.g. an unknown field) is not plain JSON."),
 	code("component.limit", "error", "Too many components."),
 	code("component.invalid", "error", "Component entry is not an object."),
 	code("component.id", "error", "Component id missing or invalid."),
@@ -2582,6 +2587,26 @@ end
 -- Entry point
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Last resort for values no specific check looks at (unknown fields, properties and graph params are only
+-- warnings): the whole definition must be plain JSON, or it could not be encoded. Only when nothing else failed,
+-- so a NaN in a known field keeps its specific diagnostic.
+local function validateJson(ctx: Ctx)
+	if #ctx.result.errors > 0 then
+		return
+	end
+	local p, message = jsonProblem(ctx.def, "", 1, {})
+	if p and message then
+		add(
+			ctx,
+			"error",
+			"effect.json",
+			p,
+			(if p == "" then "the definition" else p) .. " " .. message,
+			"definitions are plain JSON data: remove the value or replace it with a JSON value"
+		)
+	end
+end
+
 local function run(ctx: Ctx)
 	guard(ctx, "", validateEffectFields, ctx)
 	guard(ctx, "palette", validatePalette, ctx)
@@ -2591,6 +2616,7 @@ local function run(ctx: Ctx)
 	guard(ctx, "graph", validateGraph, ctx)
 	guard(ctx, "quality", validateQuality, ctx)
 	guard(ctx, "components", lint, ctx)
+	guard(ctx, "", validateJson, ctx)
 end
 
 -- Validates a (migrated) effect definition. Never throws.

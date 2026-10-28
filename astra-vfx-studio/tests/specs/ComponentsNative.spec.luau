@@ -169,7 +169,7 @@ local SPEC: { [string]: ExpectedType } = {
 			{ name = "width1", kind = "number", default = 1, min = 0, max = 1000, scale = "length" },
 			{ name = "curveSize0", kind = "number", default = 0, min = -1000, max = 1000, scale = "length" },
 			{ name = "curveSize1", kind = "number", default = 0, min = -1000, max = 1000, scale = "length" },
-			{ name = "segments", kind = "integer", default = 10, min = 1, max = 1000, quality = "segments" },
+			{ name = "segments", kind = "integer", default = 10, min = 1, max = 1000 }, -- not quality-scaled (K14)
 			{ name = "textureLength", kind = "number", default = 1, min = 0.01, max = 1000, scale = "length" },
 			{
 				name = "textureMode",
