@@ -4,14 +4,14 @@ Statuslegende: **I** = implementiert · **A** = automatisch getestet (Lune) · *
 **N** = noch nicht verifiziert. Roblox Studio ist in der Entwicklungsumgebung nicht verfügbar (Linux-Container ohne
 Studio); Spalte **S** kann erst durch einen Menschen mit Studio abgehakt werden (Anleitung: `docs/TESTING.md`).
 
-Letzte Aktualisierung: 2026-10-27
+Letzte Aktualisierung: 2026-10-28 · Automatische Tests: 2152 bestanden, 0 fehlgeschlagen, 3 übersprungen
 
 ## Phase 1 – Research & Architecture
 
 | Ergebnis | Status | Notiz |
 |---|---|---|
-| Recherche-Notizen (9 Themen) | in Arbeit | `docs/research/*.md`; DevForum/Creator Store/YouTube nur über Suchzusammenfassungen erreichbar |
-| `docs/RESEARCH.md`, `FEATURE_COMPARISON.md`, `ROBLOX_API_CONSTRAINTS.md` | in Arbeit | werden aus den geprüften Notizen erzeugt |
+| Recherche-Notizen (9 Themen, je unabhängig verifiziert) | I | `docs/research/*.md`; DevForum/Creator Store/YouTube nur über Suchzusammenfassungen erreichbar |
+| `docs/RESEARCH.md`, `FEATURE_COMPARISON.md`, `ROBLOX_API_CONSTRAINTS.md` | I | 59 Konsequenzen (K1–K59), 46 Studio-Testpunkte (U1–U46) |
 | `docs/ARCHITECTURE.md` | I | inkl. ADRs |
 | `docs/MODULE_CONTRACTS.md`, `COMPONENTS_SPEC.md`, `PLUGIN_CONTRACTS.md` | I | Implementierungsverträge |
 
@@ -29,9 +29,9 @@ Letzte Aktualisierung: 2026-10-27
 | Modul | Status |
 |---|---|
 | Types, Constants, Signal | I, A |
-| Json, Random, Env, Codec, Easing | in Arbeit |
-| Curves, Timeline, Quality, Graph | in Arbeit |
-| Komponenten (15 Typen) | `group` I; Rest geplant |
+| Json, Random, Env, Codec, Easing | I, A |
+| Curves, Timeline, Quality, Graph | I, A (adversarial review) |
+| Komponenten (17 Typen inkl. cameraShake, screenFlash) | I, A · N (Darstellung in Studio) |
 | Validation, Migration, Compiler, Builder, Player, Scheduler, Pool, API, Net | geplant |
 
 ## Plugin (src/Plugin)
@@ -40,7 +40,7 @@ Letzte Aktualisierung: 2026-10-27
 |---|---|
 | UI-Fundament (Theme, New, Maid, Input) | I, A (Konstruktion) · N (Darstellung) |
 | History (ChangeHistoryService), Settings | I, A (gegen Fakes) · N (Studio) |
-| Widgets | in Arbeit |
+| Widgets (26), Werte-Editoren (Farbe, Verlauf, Sequenz, Easing, Kurve) | I, A (Konstruktion + simuliertes Verhalten) · N (Darstellung) |
 | Editor, Storage, Preview, Panels | geplant |
 
 ## Bekannte Einschränkungen (Auszug)
