@@ -28,6 +28,10 @@
 * `supportsViewport`: only geometry types (`group`, `part`, `mesh`, `sphere`, `flash`, `shockwave`, `ring`,
   `radialBurst`, `debris`, `lightning` in `part` render mode). Particles, beams, trails and lights do not render in a
   ViewportFrame (REPORTED, see constraints doc).
+* Camera types (`cameraShake`, `screenFlash`, §17–18) are client-only: they act on `workspace.CurrentCamera`, never
+  build anything in the container, are a no-op without `Players.LocalPlayer` (servers, Studio edit mode outside the
+  preview) and reach services only through Core/Env (`Common.tryService`, `Common.hasLocalPlayer`,
+  `Common.currentCamera`), so specs can substitute clients, servers and cameras.
 * `spin` (vector3, deg/s) is applied by the Player generically (`rotation += spin × localTime`) for every component
   whose `props.spin` is a Vector3; descriptors just declare it (`Common.spinProperty()`).
 * Channels common to positioned types: `position` (vector3, length), `rotation` (vector3 deg), `scale` (number ≥ 0).
@@ -417,3 +421,112 @@ Also present directly under `rbxasset://textures/`: `sparkle.png`, `glow.png`, `
 `noise.dds`, `whiteCircle.png`, `smallWhiteCircle.png`, `ui/traildot.png`.
 
 Never invent `rbxassetid://` numbers. User assets are entered by the user (asset fields accept any id).
+
+## 17. `cameraShake` (Camera) — client-side camera shake
+
+Shakes the local player's camera while active. Offset each frame = amplitude × envelope(localTime) ×
+noise(localTime × frequency), where noise is a deterministic sum of 3 sines per axis with seed-derived phases
+(smooth, repeatable), envelope = attack (linear up), sustain, then decay with an easing (`decayEasing`) over the last
+`decay` seconds of the component span. Distance falloff from the camera to the component's world position: 1 inside
+`innerRadius`, linear to 0 at `outerRadius`. Rotation offset in degrees (pitch/yaw/roll weights) plus positional
+offset in studs.
+
+Runtime (clients only — `Players.LocalPlayer` exists): uses
+`RunService:BindToRenderStep("AstraVFX_Shake_<unique>", Enum.RenderPriority.Camera.Value + 1, fn)` while active (this
+is the documented way to run after the default camera scripts; PreRender/BindToRenderStep are client-only) and
+`UnbindFromRenderStep` on deactivate/release/destroy; multiplies `workspace.CurrentCamera.CFrame` by the offset each
+render step (camera scripts recompute the CFrame each frame, so no accumulation). Server: no-op (no instances, no
+bindings). Preview (`ctx.isPreview`): apply only when `workspace.CurrentCamera` exists AND the property
+`previewInStudio` is true (default false). In preview, capture the camera CFrame at activation and set
+`camera.CFrame = base * offset` in `update()` each frame (Studio's edit camera is not driven by camera scripts, so
+offsets would accumulate otherwise), restoring base at deactivation/destroy.
+
+| key | kind | default | range |
+|---|---|---|---|
+| amplitude | number | `0.6` | 0..20 (degrees of rotation at full strength) |
+| positionAmplitude | number | `0.15` | 0..10, length |
+| frequency | number | `18` | 0.1..60 Hz |
+| attack | number | `0.02` | 0..5 s |
+| decay | number | `0.35` | 0..10 s |
+| decayEasing | string (easing) | `"Quad.Out"` | |
+| rotationWeights | vector3 | `[1, 0.6, 0.3]` | 0..1 (pitch, yaw, roll) |
+| innerRadius | number | `20` | 0..10000, length |
+| outerRadius | number | `120` | 0..10000, length |
+| previewInStudio | boolean | `false` | |
+
+Channels: `position`, `amplitude`. `supportsViewport = false`. Cost: 0 instances, propertyUpdates 1 while active.
+
+**Implementation notes** (`src/Runtime/Core/Components/CameraShake.luau`, specs in
+`tests/specs/ComponentsCamera.spec.luau`; deviations from the text above are marked ⚑):
+
+* Envelope (S = span): `min(rise, fall)` clamped to 0..1, `rise = min(t / attack, 1)` (attack 0 → 1),
+  `fall = 1 − decayEasing(p)` with `p = (t − (S − decay)) / decay` during the last `decay` seconds; 0 for t < 0 and
+  t ≥ S. Overlapping attack and decay take the smaller value. `decayEasing` = `"Quad.Out"` therefore drops fast and
+  tails off; invalid easings fall back to Linear (Validation reports them, the key ends in `Easing`).
+* Noise per axis (pitch, yaw, roll, x, y, z): `Σ w_k sin(2π (r_k u + φ_k)) / Σ w_k`, u = t × frequency,
+  w = (1, 0.6, 0.35), r = (1, 0.59, 0.31) × (1 ± 0.1 seed-derived), φ seed-derived (Core/Random, component seed).
+  |noise| ≤ 1; the fastest component runs at `frequency`. Offset =
+  `CFrame.new(positionAmplitude·s·n_xyz) * CFrame.fromOrientation(rad(amplitude·s·weights·n_pyr))`,
+  s = envelope × falloff. `outerRadius <= innerRadius` gives a hard edge at `innerRadius`.
+* `amplitude` channel = rotation amplitude in degrees (rest value = the property, clamped 0..20); positionAmplitude
+  is not animated. `transform.scale` multiplies positionAmplitude and both radii (Compiler already applied the effect
+  scale). The distance is measured from the camera's unshaken CFrame.
+* ⚑ Undo step: besides the apply step at `Camera.Value + 1`, an undo step at `Camera.Value − 1` puts the unshaken
+  CFrame back before the camera scripts run (only if `Camera.CFrame` still holds ASTRA's last write). Reason: the
+  default PlayerModule cameras derive the next look direction from `Camera.CFrame.LookVector` (ASSUMPTION, from the
+  PlayerModule source, not verified in this repository), so a rotation left in place feeds back and drifts the view
+  (spec "does not drift a camera script that reads back Camera.CFrame.LookVector": ~3.7° after 2 s without the undo).
+  It also prevents accumulation on Scriptable cameras nobody updates. ⚑ Cost: `propertyUpdates = 2`
+  (undo + apply; the preview writes once).
+* ⚑ Mixer: all active client shakes share ONE binding pair (`AstraVFX_Shake_<token>_<n>` /
+  `AstraVFX_ShakeUndo_<token>_<n>`, `<token>` per runtime module copy, `<n>` per bind) instead of one binding per
+  component, and the offsets of concurrent shakes are composed into one write (`base × o₁ × o₂ …`, activation order).
+  Per-component undo steps would otherwise run in an undefined order and corrupt each other's base. Bound when the
+  first client shake activates, unbound (camera restored) when the last one deactivates / is released / reset /
+  destroyed. Preview shakes use a second mixer without bindings.
+* Preview: the base is captured at activation; if the author moves the Studio camera during the preview
+  (`Camera.CFrame` no longer equals the last write) the new CFrame becomes the base instead of being snapped back,
+  and deactivation does not overwrite the author's camera. A changed `CurrentCamera` restores the old camera first.
+* After each write the value read back from `Camera.CFrame` is remembered (property storage may round — Lune's does),
+  so "still holds the last write" compares like with like.
+
+## 18. `screenFlash` (Camera) — impact frame / screen flash
+
+A `ColorCorrectionEffect` parented to `workspace.CurrentCamera` (local to the player; works only under Lighting or the
+current camera — VERIFIED in docs/ROBLOX_API_CONSTRAINTS.md) whose Brightness/Contrast/Saturation/TintColor follow an
+attack → hold → decay envelope over local time (pure function). Classic anime impact frame: high contrast,
+desaturated, short. Clients only at runtime; in preview applied to the Studio camera when `previewInStudio` (default
+true — a short colour pulse is harmless; but the effect must always be removed on deactivate/destroy and created
+with `Archivable = false`).
+
+| key | kind | default | range |
+|---|---|---|---|
+| brightness | number | `0.35` | −1..2 |
+| contrast | number | `0.8` | −1..3 |
+| saturation | number | `-0.6` | −1..2 |
+| tint | color3 | `"#FFFFFF"` | |
+| attack | number | `0.02` | 0..2 s |
+| hold | number | `0.05` | 0..2 s |
+| decay | number | `0.18` | 0.01..5 s |
+| previewInStudio | boolean | `true` | |
+
+Channels: `tint`. `supportsViewport = false`. Cost: 1 instance (post effect), propertyUpdates 4 while active, notes
+"post effect: full-screen pass".
+
+**Implementation notes** (`src/Runtime/Core/Components/ScreenFlash.luau`, specs in
+`tests/specs/ComponentsCamera.spec.luau`):
+
+* Envelope as `flash` (§10): e = t/A during the attack (A = 0: peak at once), 1 while holding, linear 1 → 0 over the
+  decay, 0 otherwise. Brightness/Contrast/Saturation = value × e, TintColor = white + (tint − white) × e, so e = 0 is
+  the neutral ColorCorrection (0 / 0 / 0 / white). The `tint` channel replaces the `tint` property (baseProperty).
+* The effect exists only while the component is active, not released AND e > 0 (no idle full-screen pass after the
+  flash; scrubbing back re-creates it). Created with Name `AstraVFX_<name>`, `Archivable = false`, `Enabled = true`,
+  tagged via `ctx.tagInstance` (the Builder adds `AstraPreview` in preview), values written before parenting. While
+  it exists it is the only entry of `controller.instances` (empty otherwise) — it never lives in the container.
+  Each property is written only when it changes (4 writes per frame during attack/decay, none while holding).
+* A changed `CurrentCamera` (or an effect destroyed with the old camera) gets a fresh effect under the current
+  camera. Lighting is never touched. Viewport builds never create it (no post-processing in a ViewportFrame).
+* Brightness is documented as −1..1 (VERIFIED); authored values up to 2 are written as authored — what the engine
+  does above 1 is unverified. The cost note "Component span is shorter than attack + hold + decay; the flash is cut
+  off." is added when applicable (no Validation lint yet).
+* No distance falloff: every client that plays the effect sees the flash — game code decides who plays it.

@@ -202,6 +202,11 @@ returns a `Types.ComponentDescriptor`. Descriptor rules:
 * `estimateCost(component, quality)`: heuristic `CostEstimate` (counts of instances, emitters, beams, parts…, rates).
 * `tailTime(component)`: seconds visuals outlive the span (particles: `lifetime.Max`, trails: `lifetime`).
 * Components must work in Studio edit mode (no physics, no `Touched`, no yields).
+* Camera components (`cameraShake`, `screenFlash`; COMPONENTS_SPEC §17–18) are client-only and own nothing in the
+  container: the shake holds `RunService:BindToRenderStep` bindings while active (shared by all active shakes), the
+  flash a `ColorCorrectionEffect` under `workspace.CurrentCamera` while it shows (listed in `controller.instances`
+  only then). The Player must therefore call `setActive(false)` / `release()` / `destroy()` reliably and `update()`
+  every frame while they are active.
 
 ## 11. Core/Graph
 

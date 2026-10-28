@@ -1062,6 +1062,13 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			component(def, "root").properties.spin = nil
 			component(def, "trail").enabled = false
 			T.expect(find(V(def), "lint.trail_static")).toBeNil()
+			-- neither are components below a disabled ancestor (they are not built)
+			def = baseDef()
+			component(def, "root").properties.spin = nil
+			component(def, "root").enabled = false
+			local result = V(def)
+			T.expect(find(result, "lint.trail_static")).toBeNil()
+			expectDiag(result, "info", "component.disabled_ancestor", "components[2]")
 		end)
 
 		T.it("lint.particles_silent: particles that never emit", function()

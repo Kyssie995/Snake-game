@@ -17,19 +17,26 @@
 
 	Engine rules (docs/research/api-particles-beams-trails.md): 2..20 keypoints, the first at time 0, the last at
 	time 1, linear RGB interpolation. The value reported by onChange is Codec.normalize("colorSequence", ...), so
-	two identical keypoints collapse into the plain colour string.
+	two identical keypoints collapse into the plain colour string. Whether the engine accepts equal keypoint times
+	is unverified (docs/ROBLOX_API_CONSTRAINTS.md DT-3 / U13, decision K3), so the editor never creates them:
+	neighbouring keypoints stay at least MIN_GAP (0.001) apart. Documents that already contain equal times are
+	shown unchanged.
 
 	Interaction:
 	* Bar (UIGradient of the decoded sequence): pressing adds a keypoint with the colour evaluated at that time
 	  (Curves.evaluateColorSequence) and selects it; dragging before releasing moves it (one gesture, one undo
 	  step). At the keypoint limit the add button is disabled and the bar shows a tooltip instead.
-	* Handles below the bar: click selects, dragging moves the time (first/last stay at 0/1, the others are
-	  clamped between their neighbours, times rounded to 0.001), right-click removes (never first/last, min 2).
+	* Handles below the bar: click selects, dragging moves the time (first/last stay at 0/1, the others stay
+	  between their neighbours, times rounded to 0.001), right-click removes (never first/last, min 2).
 	* Toolbar: presets (solid, two-tone from the current endpoints, fire, ice, energy), add (+, in the middle of
 	  the widest gap), delete (−, the selected keypoint).
 	* Selected keypoint: colour via ColorPicker (popup from the swatch, or inline), time NumberInput.
 	Every gesture reports onChange(v, false) while it runs and onChange(v, true) once at the end; discrete edits
-	report true. A setValue that equals the current value is ignored, so re-renders during a drag are harmless.
+	report true; edits that change nothing report nothing. Reported and returned values are copies. A setValue
+	that equals the current value is ignored, so re-renders during a drag are harmless; a setValue that changes the
+	keypoint count (e.g. Studio undo) ends a running gesture with onChange(newValue, true) and closes the popup
+	picker. setEnabled(false) ends a running gesture the same way; while disabled, input and the programmatic
+	edits change nothing.
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -62,6 +69,7 @@ export type Props = {
 	name: string?,
 	size: UDim2?,
 	position: UDim2?,
+	anchorPoint: Vector2?,
 	layoutOrder: number?,
 	parent: Instance?,
 }
@@ -78,6 +86,7 @@ GradientEditor.__index = GradientEditor
 GradientEditor.MAX_KEYPOINTS = Constants.MAX_SEQUENCE_KEYPOINTS -- 20
 GradientEditor.LIMIT_TEXT = "Höchstens %d Keypoints – entferne einen, um einen neuen hinzuzufügen"
 GradientEditor.TIME_DECIMALS = 3
+GradientEditor.MIN_GAP = 0.001 -- smallest distance between neighbouring keypoint times (no equal times, U13)
 
 GradientEditor.PRESETS = {
 	{ value = "solid", label = "Einfarbig", description = "Farbe des gewählten Keypoints" },
@@ -137,6 +146,10 @@ type EditorData = {
 	_pending: boolean,
 	_enabled: boolean,
 	_popup: any?, -- open ColorPicker popup
+	_popupIndex: number?, -- keypoint the popup edits
+	_pickerIndex: number?, -- keypoint whose colour the inline picker shows as "original"
+	_ignoreScrub: boolean, -- the time field's scrub outlived a gesture that was ended early: ignore it to its end
+	_scrubReported: boolean, -- the running time-field scrub has reported (so its final report will follow)
 	_addTooltipLimited: boolean?,
 	_destroyed: boolean,
 }
@@ -179,8 +192,26 @@ local function copyKeypoints(list: { Keypoint }): { Keypoint }
 	return out
 end
 
+-- Value as handed to the host: a fresh table for keypoint lists (the host may keep or edit it).
+local function copyValue(value: any): any
+	return if type(value) == "table" then copyKeypoints(value) else value
+end
+
+local function finite(x: any): boolean
+	return type(x) == "number" and x == x and x ~= math.huge and x ~= -math.huge
+end
+
 local function roundTime(t: number): number
 	return Kit.round(math.clamp(t, 0, 1), GradientEditor.TIME_DECIMALS)
+end
+
+-- Times on the 0.001 grid at or above / at or below t (tolerant of float noise such as 0.599 + 0.001).
+local TIME_SCALE = 10 ^ GradientEditor.TIME_DECIMALS
+local function ceilTime(t: number): number
+	return math.ceil(t * TIME_SCALE - 1e-6) / TIME_SCALE
+end
+local function floorTime(t: number): number
+	return math.floor(t * TIME_SCALE + 1e-6) / TIME_SCALE
 end
 
 -- Canonical keypoint list and value of any JSON colorSequence (invalid values become white).
@@ -259,6 +290,10 @@ function GradientEditor.new(props: Props): GradientEditor
 		_pending = false,
 		_enabled = props.enabled ~= false,
 		_popup = nil :: any,
+		_popupIndex = nil :: number?,
+		_pickerIndex = nil :: number?,
+		_ignoreScrub = false,
+		_scrubReported = false,
 		_addTooltipLimited = nil :: boolean?,
 		_destroyed = false,
 	}, GradientEditor)
@@ -392,6 +427,14 @@ function GradientEditor.new(props: Props): GradientEditor
 		position = UDim2.new(1, -TIME_WIDTH, 0, y),
 		size = UDim2.fromOffset(TIME_WIDTH, ROW),
 		onChange = function(v: number, final: boolean)
+			if self._ignoreScrub then
+				-- the gesture this scrub belonged to was ended early (setValue / setEnabled): ignore it to its end
+				if final then
+					self._ignoreScrub = false
+				end
+				return
+			end
+			self._scrubReported = not final
 			self:setKeypointTime(self._selected, v, final)
 		end,
 	})
@@ -476,10 +519,7 @@ function GradientEditor.new(props: Props): GradientEditor
 	end
 	maid:give(self._handleMaid)
 	maid:give(function()
-		if self._popup then
-			self._popup:close()
-			self._popup = nil
-		end
+		self:_closePopup()
 	end)
 
 	self:_rebuild()
@@ -512,6 +552,21 @@ end
 
 function GradientEditor._limitText(self: GradientEditor): string
 	return string.format(GradientEditor.LIMIT_TEXT, self._max)
+end
+
+-- Time interval keypoint `index` may move in: at least MIN_GAP away from both neighbours. nil for the fixed first
+-- and last keypoint and when there is no room (documents with equal or very close times).
+function GradientEditor._bounds(self: GradientEditor, index: number): (number?, number?)
+	local list = self._keypoints
+	if index <= 1 or index >= #list then
+		return nil, nil
+	end
+	local lo = ceilTime(list[index - 1][1] + GradientEditor.MIN_GAP)
+	local hi = floorTime(list[index + 1][1] - GradientEditor.MIN_GAP)
+	if lo > hi then
+		return nil, nil
+	end
+	return lo, hi
 end
 
 -- Colours ---------------------------------------------------------------------------------------------------------
@@ -550,31 +605,51 @@ function GradientEditor._emit(self: GradientEditor, final: boolean)
 		if changed or self._pending then
 			self._pending = false
 			if self._props.onChange then
-				self._props.onChange(value, true)
+				self._props.onChange(copyValue(value), true)
 			end
 		end
 	elseif changed then
 		self._pending = true
 		if self._props.onChange then
-			self._props.onChange(value, false)
+			self._props.onChange(copyValue(value), false)
 		end
 	end
 end
 
+-- Ends a running gesture: closes it with onChange(v, true) when it reported anything. `abort` (the gesture is
+-- cut short by setValue / setEnabled / a discrete edit) also ignores the rest of a running time-field scrub.
+function GradientEditor._endGesture(self: GradientEditor, abort: boolean?)
+	self._gesture = nil
+	-- only a scrub that has reported sends a final at its end (NumberInput), so only then is there a rest to ignore
+	if abort and self._scrubReported and self.timeInput:isDragging() then
+		self._ignoreScrub = true
+		self._scrubReported = false
+	end
+	if self._pending then
+		self:_emit(true)
+	end
+end
+
+-- Closes the popup picker without letting it write: its closing report is ignored (the caller has already closed
+-- the gesture or is about to).
+function GradientEditor._closePopup(self: GradientEditor)
+	local popup = self._popup
+	self._popup = nil
+	self._popupIndex = nil
+	if popup then
+		popup:close()
+	end
+end
+
 -- Inserts a keypoint at `time` (colour evaluated there unless given) and selects it; `report` sends the
--- non-final report of a gesture. Returns the new index, or nil at the limit.
+-- non-final report of a gesture. The time moves to the nearest free time of its gap (at least MIN_GAP from both
+-- neighbours). Returns the new index, or nil at the limit, without room, or for an invalid time or colour.
 function GradientEditor._insert(self: GradientEditor, time: number, colour: any?, report: boolean): number?
-	if not self:canAdd() then
+	if not self:canAdd() or not finite(time) then
 		return nil
 	end
 	local list = self._keypoints
 	local t = roundTime(time)
-	local value: any = colour
-	if value == nil then
-		value = Codec.toHex(Curves.evaluateColorSequence(self._sequence, t))
-	else
-		value = Codec.normalize("color3", value)
-	end
 	-- after every keypoint with time <= t, but never after the last one (it stays at 1) or before the first
 	local index = #list
 	for i = 2, #list do
@@ -582,6 +657,22 @@ function GradientEditor._insert(self: GradientEditor, time: number, colour: any?
 			index = i
 			break
 		end
+	end
+	local lo = ceilTime(list[index - 1][1] + GradientEditor.MIN_GAP)
+	local hi = floorTime(list[index][1] - GradientEditor.MIN_GAP)
+	if lo > hi then
+		return nil
+	end
+	t = math.clamp(t, lo, hi)
+	local value: any = colour
+	if value == nil then
+		value = Codec.toHex(Curves.evaluateColorSequence(self._sequence, t))
+	else
+		local ok, canonical = pcall(Codec.normalize :: any, "color3", value)
+		if not ok then
+			return nil
+		end
+		value = canonical
 	end
 	table.insert(list, index, { t, value })
 	self._selected = index
@@ -595,14 +686,15 @@ function GradientEditor._insert(self: GradientEditor, time: number, colour: any?
 	return index
 end
 
--- Moves keypoint `index` to `time` (clamped between its neighbours; first/last are fixed); `report` sends a
--- non-final report. Returns true when the time changed.
+-- Moves keypoint `index` to `time` (kept MIN_GAP away from its neighbours; first/last are fixed); `report` sends
+-- a non-final report. Returns true when the time changed.
 function GradientEditor._moveTo(self: GradientEditor, index: number, time: number, report: boolean): boolean
 	local list = self._keypoints
-	if index <= 1 or index >= #list then
+	local lo, hi = self:_bounds(index)
+	if lo == nil or hi == nil or not finite(time) then
 		return false
 	end
-	local t = math.clamp(roundTime(time), list[index - 1][1], list[index + 1][1])
+	local t = math.clamp(roundTime(time), lo, hi)
 	if t == list[index][1] then
 		return false
 	end
@@ -745,9 +837,10 @@ function GradientEditor._refresh(self: GradientEditor)
 	self.barHit.Interactable = enabled
 
 	local kp = list[selected]
-	local movable = selected > 1 and selected < n
-	if movable then
-		self.timeInput:setRange(list[selected - 1][1], list[selected + 1][1])
+	local lo, hi = self:_bounds(selected)
+	local movable = lo ~= nil and hi ~= nil
+	if lo and hi then
+		self.timeInput:setRange(lo, hi)
 	else
 		self.timeInput:setRange(0, 1)
 	end
@@ -759,7 +852,18 @@ function GradientEditor._refresh(self: GradientEditor)
 		self.swatch:setValue(kp[2])
 		self.swatch:setEnabled(enabled)
 	end
+	-- an open popup follows its keypoint (e.g. Studio undo of a colour edit); equal values are ignored
+	local popup = self._popup
+	local popupKp = if self._popupIndex then list[self._popupIndex] else nil
+	if popup and popupKp then
+		popup:setValue(popupKp[2])
+	end
 	if self.picker then
+		if self._pickerIndex ~= selected then
+			-- "original" (revert) is the colour the keypoint had when it was selected
+			self._pickerIndex = selected
+			self.picker:setOriginal(kp[2])
+		end
 		self.picker:setValue(kp[2])
 		self.picker:setEnabled(enabled)
 		local label = self.instance:FindFirstChild("SelectedLabel") :: TextLabel?
@@ -771,20 +875,29 @@ end
 
 -- Public API -----------------------------------------------------------------------------------------------------
 
--- Display only (no callbacks). Equal values are ignored; the selection index is kept (clamped).
+-- Display only (no callbacks). Equal values are ignored; the selection index is kept (clamped). When the keypoint
+-- count changes under a running gesture (e.g. Studio undo during a drag), the gesture ends with
+-- onChange(newValue, true) and an open popup picker closes without writing; this is the only case in which
+-- setValue reports.
 function GradientEditor.setValue(self: GradientEditor, value: any)
 	local keypoints, normalized = parse(value)
 	if deepEqual(normalized, self._value) then
 		return
 	end
+	local countChanged = #keypoints ~= #self._keypoints
 	self._keypoints = keypoints
 	self._value = normalized
+	self._pickerIndex = nil -- the inline picker's "original" follows the document
+	if countChanged then
+		self:_endGesture(true)
+		self:_closePopup()
+	end
 	self:_rebuild()
 end
 
--- Current JSON colorSequence (canonical: a colour string when both keypoints are equal).
+-- Current JSON colorSequence (canonical: a colour string when both keypoints are equal). A copy.
 function GradientEditor.getValue(self: GradientEditor): any
-	return self._value
+	return copyValue(self._value)
 end
 
 -- Copy of the keypoint list { { time, colour }, ... } (always at least 2 entries).
@@ -817,8 +930,16 @@ function GradientEditor.canRemove(self: GradientEditor, index: number): boolean
 	return index > 1 and index < #self._keypoints and #self._keypoints > 2
 end
 
--- Adds a keypoint like a click on the bar (colour evaluated at `time` unless given). Returns the index or nil.
+--[[
+	Adds a keypoint like a click on the bar (colour evaluated at `time` unless given; the time moves to the nearest
+	free time, at least MIN_GAP from its neighbours). Returns the index, or nil at the limit, without room, while
+	disabled, or for an invalid time or colour.
+]]
 function GradientEditor.addKeypoint(self: GradientEditor, time: number, colour: any?): number?
+	if not self._enabled then
+		return nil
+	end
+	self:_endGesture(true)
 	local index = self:_insert(time, colour, false)
 	if index then
 		self:_emit(true)
@@ -826,15 +947,13 @@ function GradientEditor.addKeypoint(self: GradientEditor, time: number, colour: 
 	return index
 end
 
--- Removes a keypoint (never the first/last; at least 2 remain). Returns true when removed.
+-- Removes a keypoint (never the first/last; at least 2 remain; not while disabled). Returns true when removed.
 function GradientEditor.removeKeypoint(self: GradientEditor, index: number): boolean
-	if not self:canRemove(index) then
+	if not self._enabled or not self:canRemove(index) then
 		return false
 	end
+	self:_endGesture(true) -- e.g. a right-click during a drag: the drag ends first
 	table.remove(self._keypoints, index)
-	if self._gesture then
-		self._gesture = nil
-	end
 	local previous = self._selected
 	if previous >= index then
 		self._selected = math.max(1, previous - 1)
@@ -862,11 +981,12 @@ function GradientEditor.selectKeypoint(self: GradientEditor, index: number): boo
 	return true
 end
 
--- Sets a keypoint's time like the time field (clamped between the neighbours; first/last are fixed).
--- final = false (scrubbing) reports non-final changes; the default reports onChange(v, true).
+-- Sets a keypoint's time like the time field (kept MIN_GAP away from its neighbours; first/last are fixed).
+-- final = false (scrubbing) reports non-final changes; the default reports onChange(v, true) when the time changed
+-- or when it closes earlier non-final reports. false for fixed keypoints, invalid times and while disabled.
 function GradientEditor.setKeypointTime(self: GradientEditor, index: number, time: number, final: boolean?): boolean
 	local list = self._keypoints
-	if index <= 1 or index >= #list then
+	if not self._enabled or index <= 1 or index >= #list or not finite(time) then
 		return false
 	end
 	local isFinal = final ~= false
@@ -877,10 +997,11 @@ function GradientEditor.setKeypointTime(self: GradientEditor, index: number, tim
 	return true
 end
 
--- Sets a keypoint's colour (any JSON colour form; "$key" stays a reference) like the colour picker.
+-- Sets a keypoint's colour (any JSON colour form; "$key" stays a reference) like the colour picker. false for
+-- invalid indices or colours and while disabled.
 function GradientEditor.setKeypointColor(self: GradientEditor, index: number, colour: any, final: boolean?): boolean
 	local kp = self._keypoints[index]
-	if kp == nil then
+	if kp == nil or not self._enabled then
 		return false
 	end
 	local ok, canonical = pcall(Codec.normalize :: any, "color3", colour)
@@ -901,8 +1022,12 @@ function GradientEditor.setKeypointColor(self: GradientEditor, index: number, co
 	return true
 end
 
--- Applies a preset ("solid", "twoTone", "fire", "ice", "energy"). Reports onChange(v, true).
+-- Applies a preset ("solid", "twoTone", "fire", "ice", "energy"). Reports onChange(v, true) when the value
+-- changed. false for unknown ids, presets above the keypoint limit and while disabled.
 function GradientEditor.applyPreset(self: GradientEditor, id: string): boolean
+	if not self._enabled then
+		return false
+	end
 	local value = GradientEditor.presetValue(id, self._keypoints, self._selected)
 	if value == nil then
 		return false
@@ -911,8 +1036,10 @@ function GradientEditor.applyPreset(self: GradientEditor, id: string): boolean
 	if #keypoints > self._max then
 		return false
 	end
+	self:_endGesture(true)
 	self._keypoints = keypoints
 	self._selected = math.clamp(self._selected, 1, #keypoints)
+	self._pickerIndex = nil
 	self:_rebuild()
 	self:_emit(true)
 	return true
@@ -929,21 +1056,27 @@ function GradientEditor.openPicker(self: GradientEditor): any
 	end
 	local index = self._selected
 	local kp = self._keypoints[index]
-	local popup = ColorPicker.open(host, {
+	local popup: any = nil
+	popup = ColorPicker.open(host, {
 		value = kp[2],
 		palette = self._palette,
 		anchor = if self.swatch then self.swatch.instance else nil,
 		title = string.format("Keypoint %d", index),
 		onChange = function(v: string, final: boolean)
-			if not self._destroyed then
+			-- a popup detached by setValue / setEnabled / destroy (see _closePopup) writes nothing more
+			if not self._destroyed and popup ~= nil and self._popup == popup then
 				self:setKeypointColor(index, v, final)
 			end
 		end,
 		onClose = function()
-			self._popup = nil
+			if self._popup == popup then
+				self._popup = nil
+				self._popupIndex = nil
+			end
 		end,
 	})
 	self._popup = popup
+	self._popupIndex = index
 	return popup
 end
 
@@ -962,6 +1095,7 @@ function GradientEditor.setPalette(self: GradientEditor, palette: { [string]: an
 			value = self._keypoints[self._selected][2],
 			palette = palette,
 			host = self._host,
+			enabled = self._enabled,
 			position = old.instance.Position,
 			onChange = function(v: string, final: boolean)
 				self:setKeypointColor(self._selected, v, final)
@@ -971,6 +1105,7 @@ function GradientEditor.setPalette(self: GradientEditor, palette: { [string]: an
 		self._maid:give(picker)
 		old:destroy()
 		self.picker = picker
+		self._pickerIndex = nil
 	end
 	self:_refresh()
 end
@@ -979,12 +1114,14 @@ function GradientEditor.isDragging(self: GradientEditor): boolean
 	return self._gesture ~= nil
 end
 
+-- Disabling ends a running gesture (bar, handle, time scrub, picker drag) with onChange(v, true) and closes the
+-- popup picker; the rest of that gesture is ignored.
 function GradientEditor.setEnabled(self: GradientEditor, enabled: boolean)
-	self._enabled = enabled
-	if not enabled and self._popup then
-		self._popup:close()
-		self._popup = nil
+	if not enabled and self._enabled then
+		self:_endGesture(true)
+		self:_closePopup()
 	end
+	self._enabled = enabled
 	self:_refresh()
 end
 
@@ -993,11 +1130,9 @@ function GradientEditor.destroy(self: GradientEditor)
 		return
 	end
 	-- a running gesture (bar, handle, time scrub, picker drag) still ends with final = true
-	self._gesture = nil
-	if self._pending then
-		self:_emit(true)
-	end
+	self:_endGesture(true)
 	self._destroyed = true
+	self:_closePopup()
 	self._maid:clean()
 end
 

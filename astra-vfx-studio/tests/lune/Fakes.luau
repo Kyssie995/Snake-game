@@ -6,6 +6,21 @@
 	unchanged. Everything a fake does is recorded so specs can assert on it (e.g. how many particles were emitted).
 
 	These fakes are deliberately minimal. They prove call sequencing and data flow, NOT visual results.
+
+	RunService:BindToRenderStep / UnbindFromRenderStep (Lune has neither): bindings are recorded in
+	`fakes.renderBindings` (name -> { name, priority, fn, order }) and every call in `fakes.renderLog`.
+	`fakes:renderStep(dt)` runs the bound functions in ascending priority (ties: bind order) — the engine's documented
+	rule "lower priority runs earlier" (docs/ROBLOX_API_CONSTRAINTS.md §12). `fakes:step(dt)` runs them after
+	PreRender/RenderStepped; the relative order of those events and bound functions is a choice of the fake, not a
+	verified engine fact, so specs must not depend on it. Binding an existing name replaces the old binding (engine
+	behaviour for duplicate names is not documented); unbinding an unknown name is a no-op (VERIFIED: it does not
+	throw). Unlike the engine, the fake also works where there is no local player — specs simulate clients and
+	servers through Env.override("Players", …) instead.
+
+	Players.LocalPlayer cannot be faked here: Lune's reflection property takes precedence over
+	roblox.implementProperty and always reads nil. Specs simulate a client with
+	Env.override("Players", { LocalPlayer = … }). Note that Lune's Workspace starts with a default CurrentCamera and
+	that `workspace.CurrentCamera = nil` is rejected by Lune, so specs that need "no camera" override Workspace too.
 ]]
 
 local roblox = require("@lune/roblox")
@@ -83,6 +98,9 @@ local function instanceSignal(inst: any, name: string): FakeSignal
 	return s
 end
 
+export type RenderBinding = { name: string, priority: number, fn: (dt: number) -> (), order: number }
+export type RenderLogEntry = { action: "bind" | "unbind", name: string, priority: number? }
+
 export type Fakes = {
 	heartbeat: FakeSignal,
 	preRender: FakeSignal,
@@ -92,8 +110,12 @@ export type Fakes = {
 	emits: { { instance: any, count: number } },
 	clears: { any },
 	sounds: { { instance: any, action: string } },
+	renderBindings: { [string]: RenderBinding },
+	renderLog: { RenderLogEntry },
 	reset: (self: Fakes) -> (),
 	step: (self: Fakes, dt: number) -> (),
+	renderStep: (self: Fakes, dt: number) -> (),
+	renderBindingCount: (self: Fakes) -> number,
 	totalEmitted: (self: Fakes, instance: any?) -> number,
 	signalFor: (self: Fakes, instance: any, eventName: string) -> FakeSignal,
 }
@@ -113,12 +135,17 @@ function Fakes.install(): Fakes
 		emits = {},
 		clears = {},
 		sounds = {},
+		renderBindings = {},
+		renderLog = {},
 	} :: any
+	local bindOrder = 0
 
 	function fakes.reset(self: Fakes)
 		table.clear(self.emits)
 		table.clear(self.clears)
 		table.clear(self.sounds)
+		table.clear(self.renderBindings)
+		table.clear(self.renderLog)
 		self.heartbeat._handlers = {}
 		self.preRender._handlers = {}
 		self.renderStepped._handlers = {}
@@ -130,12 +157,42 @@ function Fakes.install(): Fakes
 		self.flags.IsEdit = true
 	end
 
-	-- Fires one frame of the main RunService events (PreRender/RenderStepped receive dt, Heartbeat receives dt).
+	-- Fires one frame of the main RunService events (PreRender/RenderStepped receive dt, Heartbeat receives dt) and
+	-- runs the render-step bindings after PreRender/RenderStepped (order chosen by the fake, see header).
 	function fakes.step(self: Fakes, dt: number)
 		self.preRender:Fire(dt)
 		self.renderStepped:Fire(dt)
+		self:renderStep(dt)
 		self.stepped:Fire(0, dt)
 		self.heartbeat:Fire(dt)
+	end
+
+	-- Runs every BindToRenderStep function once, lowest priority first (ties: bind order). A function unbound by an
+	-- earlier one in the same step does not run.
+	function fakes.renderStep(self: Fakes, dt: number)
+		local list: { RenderBinding } = {}
+		for _, binding in self.renderBindings do
+			table.insert(list, binding)
+		end
+		table.sort(list, function(a: RenderBinding, b: RenderBinding): boolean
+			if a.priority ~= b.priority then
+				return a.priority < b.priority
+			end
+			return a.order < b.order
+		end)
+		for _, binding in list do
+			if self.renderBindings[binding.name] == binding then
+				binding.fn(dt)
+			end
+		end
+	end
+
+	function fakes.renderBindingCount(self: Fakes): number
+		local n = 0
+		for _ in self.renderBindings do
+			n += 1
+		end
+		return n
 	end
 
 	function fakes.totalEmitted(self: Fakes, instance: any?): number
@@ -172,6 +229,21 @@ function Fakes.install(): Fakes
 	end
 	roblox.implementMethod("RunService", "IsRunMode", function()
 		return fakes.flags.IsRunning
+	end)
+	-- RunService:BindToRenderStep(name: string, priority: int, function) / UnbindFromRenderStep(name: string)
+	-- (signatures: API dump 0.745). See the header for what the fake does and does not model.
+	roblox.implementMethod("RunService", "BindToRenderStep", function(_self, name: string, priority: number, fn: any)
+		assert(type(name) == "string", "BindToRenderStep: name must be a string")
+		assert(type(priority) == "number", "BindToRenderStep: priority must be a number")
+		assert(type(fn) == "function", "BindToRenderStep: function expected")
+		bindOrder += 1
+		fakes.renderBindings[name] = { name = name, priority = priority, fn = fn, order = bindOrder }
+		table.insert(fakes.renderLog, { action = "bind", name = name, priority = priority })
+	end)
+	roblox.implementMethod("RunService", "UnbindFromRenderStep", function(_self, name: string)
+		assert(type(name) == "string", "UnbindFromRenderStep: name must be a string")
+		fakes.renderBindings[name] = nil
+		table.insert(fakes.renderLog, { action = "unbind", name = name })
 	end)
 
 	-- Effects

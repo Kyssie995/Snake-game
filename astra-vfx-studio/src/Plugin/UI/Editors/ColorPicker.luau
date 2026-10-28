@@ -29,10 +29,15 @@
 
 	Gestures: pressing the square/bar jumps there (onChange(v, false)), dragging follows (false), releasing reports
 	onChange(v, true) once. Typed values, chips and the R/G/B fields (typing) report true; scrubbing R/G/B reports
-	false then true. The HSV state is kept while editing, so the hue survives greys and black. Values set with
-	setValue that equal the current value are ignored (the editor re-renders fields during a gesture).
+	false then true. Edits that change nothing report nothing. The HSV state is kept while editing, so the hue
+	survives greys and black. Values set with setValue that equal the current value are ignored (the editor
+	re-renders fields during a gesture). setEnabled(false) ends a running gesture with onChange(v, true); while
+	disabled, input and the methods that act like the user (setHSV, setHex, setRGB, choosePalette, chooseRecent,
+	revert) change nothing.
 
-	Drags use UI/Input.drag with host.widget (no UserInputService). Only one popup is open per host.
+	Drags use UI/Input.drag with host.widget (no UserInputService). Only one popup is open per host; it closes on a
+	click outside (overlay), the x button, focus loss of the widget (WindowFocusReleased) and when its anchor is
+	destroyed.
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -63,6 +68,7 @@ export type Props = {
 	enabled: boolean?,
 	name: string?,
 	position: UDim2?,
+	anchorPoint: Vector2?,
 	layoutOrder: number?,
 	parent: Instance?,
 }
@@ -569,7 +575,7 @@ function ColorPicker._build(props: Props, popup: boolean): ColorPicker
 		end,
 		onChange = function(text: string)
 			local parsed = ColorPicker.parseInput(text, self._props.palette)
-			if parsed then
+			if parsed and self._enabled then
 				self:_commit(parsed, nil, true)
 			end
 		end,
@@ -732,6 +738,18 @@ function ColorPicker.open(host: Kit.Host, props: Props): ColorPicker
 			picker:close()
 		end))
 	end
+	-- like Dropdown and EasingPicker: the popup closes when the widget loses focus
+	local widget = host.widget
+	if widget then
+		local ok, signal = pcall(function()
+			return widget.WindowFocusReleased
+		end)
+		if ok and signal then
+			picker._maid:give(signal:Connect(function()
+				picker:close()
+			end))
+		end
+	end
 
 	-- position: below the anchor (above when there is no room), clamped into the root
 	local rootPos, rootSize = Kit.geometry(host.root)
@@ -870,6 +888,9 @@ local function channels(color: Color3): { number }
 end
 
 function ColorPicker._setChannel(self: ColorPicker, axis: number, value: number, final: boolean)
+	if not self._enabled or value ~= value then
+		return -- setEnabled(false) already closed the gesture
+	end
 	local rgb = channels(self._color)
 	rgb[axis] = math.clamp(math.floor(value + 0.5), 0, 255)
 	local color = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
@@ -1042,13 +1063,20 @@ function ColorPicker.getHSV(self: ColorPicker): (number, number, number)
 end
 
 -- Like a user edit of the square/bar: sets h, s, v (0..1) and reports onChange(value, final ~= false).
+-- Ignored while disabled and for NaN.
 function ColorPicker.setHSV(self: ColorPicker, h: number, s: number, v: number, final: boolean?)
+	if not self._enabled or h ~= h or s ~= s or v ~= v then
+		return
+	end
 	local hh, ss, vv = math.clamp(h, 0, 1), math.clamp(s, 0, 1), math.clamp(v, 0, 1)
 	self:_commit(hsvHex(hh, ss, vv), { hh, ss, vv }, final ~= false)
 end
 
--- Like typing into the hex field. Returns false (and changes nothing) for invalid text.
+-- Like typing into the hex field. Returns false (and changes nothing) for invalid text and while disabled.
 function ColorPicker.setHex(self: ColorPicker, text: string): boolean
+	if not self._enabled or type(text) ~= "string" then
+		return false
+	end
 	local parsed = ColorPicker.parseInput(text, self._props.palette)
 	if parsed == nil then
 		return false
@@ -1057,8 +1085,11 @@ function ColorPicker.setHex(self: ColorPicker, text: string): boolean
 	return true
 end
 
--- Like editing the R/G/B fields (0..255 each).
+-- Like editing the R/G/B fields (0..255 each). Ignored while disabled and for NaN.
 function ColorPicker.setRGB(self: ColorPicker, r: number, g: number, b: number, final: boolean?)
+	if not self._enabled or r ~= r or g ~= g or b ~= b then
+		return
+	end
 	local function ch(x: number): number
 		return math.clamp(math.floor(x + 0.5), 0, 255)
 	end
@@ -1099,11 +1130,23 @@ function ColorPicker.chooseRecent(self: ColorPicker, index: number): boolean
 	return true
 end
 
--- Back to the value the picker was created/opened with.
+-- Back to the value the picker was created/opened with (or the last setOriginal).
 function ColorPicker.revert(self: ColorPicker)
 	if self._enabled then
 		self:_commit(self._originalValue, nil, true)
 	end
+end
+
+-- Display only: the colour the "original" half of the preview shows and revert() returns to (for an inline picker
+-- whose owner switches the edited item, e.g. the GradientEditor selecting another keypoint). Invalid values are
+-- ignored.
+function ColorPicker.setOriginal(self: ColorPicker, value: any)
+	local canon = canonical(value)
+	if canon == nil or canon == self._originalValue then
+		return
+	end
+	self._originalValue = canon
+	self:_refresh()
 end
 
 function ColorPicker.getRecent(self: ColorPicker): { string }
@@ -1114,7 +1157,13 @@ function ColorPicker.isDragging(self: ColorPicker): boolean
 	return self._dragging ~= nil
 end
 
+-- Disabling ends a running gesture (square/bar drag or R/G/B scrub) with onChange(v, true); the rest of that
+-- gesture is ignored.
 function ColorPicker.setEnabled(self: ColorPicker, enabled: boolean)
+	if not enabled and self._enabled then
+		self._dragging = nil
+		self:_finish()
+	end
 	self._enabled = enabled
 	self:_refresh()
 end

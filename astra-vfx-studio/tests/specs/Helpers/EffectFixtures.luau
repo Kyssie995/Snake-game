@@ -95,7 +95,15 @@ EffectFixtures.FULL_JSON = [=[
       "events": [ { "id": "regen", "time": 0.5, "action": "regenerate" } ] },
     { "id": "hidden", "name": "Hidden", "type": "group", "enabled": false },
     { "id": "hiddenChild", "name": "Hidden Child", "type": "part", "parent": "hidden" },
-    { "id": "ultra", "name": "Ultra Glow", "type": "light", "minQuality": "High" }
+    { "id": "ultra", "name": "Ultra Glow", "type": "light", "minQuality": "High" },
+    { "id": "shake", "name": "Shake", "type": "cameraShake", "startTime": 0.5, "duration": 0.6,
+      "properties": { "amplitude": 1.2, "frequency": 22, "decay": 0.4, "outerRadius": 150 },
+      "tracks": [
+        { "id": "calm", "channel": "amplitude", "keyframes": [
+          { "time": 0, "value": 1.2 }, { "time": 0.6, "value": 0.3, "easing": "Quad.Out" } ] }
+      ] },
+    { "id": "impactFrame", "name": "Impact Frame", "type": "screenFlash", "startTime": 0.5, "duration": 0.3,
+      "properties": { "contrast": 1.2, "saturation": -1, "tint": "$hot" } }
   ],
   "graph": {
     "nodes": [

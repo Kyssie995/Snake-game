@@ -40,8 +40,14 @@ unter `/root/tools/ref/globalTypes.d.luau` (luau-lsp, Engine 0.745); der lokale 
   `return function(T, use, ctx) … end`. Module holt man mit `use("AstraVFX.Core.Json")` (Pfad im Rojo-Baum).
 * `ctx.environment` ist `"lune"` oder `"studio"`. Engine-Fakes (nur Lune) unter `ctx.fakes`
   (`tests/lune/Fakes.luau`): `fakes:step(dt)` feuert Heartbeat & Co., `fakes.emits` protokolliert
-  `ParticleEmitter:Emit`, `fakes.sounds`, `fakes.clears`, `fakes:reset()`. Tests, die Fakes brauchen, mit
+  `ParticleEmitter:Emit`, `fakes.sounds`, `fakes.clears`, `fakes:reset()`. `RunService:BindToRenderStep` /
+  `UnbindFromRenderStep` werden in `fakes.renderBindings` und `fakes.renderLog` protokolliert, `fakes:renderStep(dt)`
+  führt die Bindungen nach Priorität aus (`fakes:step` ebenfalls). Tests, die Fakes brauchen, mit
   `T.itIf(ctx.environment == "lune", …)` markieren.
+* `Players.LocalPlayer` lässt sich in Lune nicht faken; Clients/Server simuliert man mit
+  `Env.override("Players", { LocalPlayer = … })` bzw. `{}`. Lunes Workspace hat eine Standard-`CurrentCamera`, und
+  `CurrentCamera = nil` lehnt Lune ab – Kameras deshalb über `Env.override("Workspace", { CurrentCamera = … })`.
+  Lune rundet CFrame-Properties beim ersten Schreiben (~1e-5).
 * Lune-Instanzen prüfen Eigenschaftsnamen und Werttypen gegen die echte Reflection-Datenbank – Tests sollen echte
   Instanzen bauen, wo sinnvoll. Lune kennt aber kein Rendering und keine Physik.
 * Matcher: `toBe`, `toEqual` (tief), `toBeCloseTo(x, eps)` (auch Vector3/Color3/CFrame), `toBeNil`, `toBeTruthy`,

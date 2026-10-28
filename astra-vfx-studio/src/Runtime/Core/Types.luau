@@ -398,7 +398,8 @@ export type CostEstimate = {
 export type ComponentDescriptor = {
 	type: string,
 	displayName: string,
-	category: string, -- "Particles" | "Beams & Trails" | "Geometry" | "Lighting" | "Audio" | "Procedural" | "Structure"
+	-- "Particles" | "Beams & Trails" | "Geometry" | "Lighting" | "Audio" | "Procedural" | "Camera" | "Structure"
+	category: string,
 	description: string,
 	icon: string?, -- short glyph or rbxasset icon path for the UI
 	properties: { PropertySpec },

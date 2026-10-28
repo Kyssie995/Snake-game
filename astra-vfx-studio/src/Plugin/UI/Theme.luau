@@ -62,6 +62,7 @@ Theme.categoryColors = {
 	Lighting = hex("#FFE066"),
 	Audio = hex("#BA68C8"),
 	Procedural = hex("#8B6CFF"),
+	Camera = hex("#F48FB1"), -- rose: screen-space effects (camera shake, screen flash)
 	Structure = hex("#A1A5AE"),
 }
 

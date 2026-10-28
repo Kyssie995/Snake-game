@@ -22,9 +22,13 @@
 
 	Popup: closes on a style choice, a click outside (transparent overlay in host.root), right-click outside,
 	WindowFocusReleased, a second click on the button, setEnabled(false), destroy() and when the button is destroyed
-	with an ancestor. In bezier mode it stays open while editing. Thumbnails sample Easing.get / Easing.parse; the
-	bezier preview draws the parametric curve P0 (0,0), P1, P2, P3 (1,1) (Draw.bezier) — the same curve Easing.bezier
-	evaluates as y(x).
+	with an ancestor. In bezier mode it stays open while editing. Gestures (handle drags, field scrubs) report
+	onChange(v, false) and then exactly one onChange(v, true), also when the popup closes or the picker is disabled
+	or destroyed in the middle; choices and presets equal to the current value report nothing. setEnabled(false)
+	ends a running gesture first; while disabled, choose / setBezier / applyPreset change nothing.
+
+	Thumbnails sample Easing.get / Easing.parse; the bezier preview draws the parametric curve P0 (0,0), P1, P2,
+	P3 (1,1) (Draw.bezier) — the same curve Easing.bezier evaluates as y(x).
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -85,7 +89,7 @@ type EasingPickerData = {
 	_hovered: boolean,
 	_destroyed: boolean,
 	_dragHandle: number?,
-	_dragChanged: boolean,
+	_pending: boolean, -- a non-final report has not been closed with final = true yet
 }
 
 export type EasingPicker = typeof(setmetatable({} :: EasingPickerData, EasingPicker))
@@ -359,7 +363,7 @@ function EasingPicker.new(props: Props): EasingPicker
 		_hovered = false,
 		_destroyed = false,
 		_dragHandle = nil :: number?,
-		_dragChanged = false,
+		_pending = false,
 	}, EasingPicker)
 
 	maid:give(root.MouseEnter:Connect(function()
@@ -709,7 +713,6 @@ function EasingPicker._buildBezier(self: EasingPicker, popup: Frame, popupMaid: 
 		popupMaid:give(Input.drag(widget, preview, {
 			onPress = function(pos: Vector2, _mods: Input.Mods)
 				self._dragHandle = self:_hitHandle(pos)
-				self._dragChanged = false
 			end,
 			onMove = function(pos: Vector2, _delta: Vector2, _mods: Input.Mods)
 				local handle = self._dragHandle
@@ -721,17 +724,12 @@ function EasingPicker._buildBezier(self: EasingPicker, popup: Frame, popupMaid: 
 				b[handle * 2 - 1] = x
 				b[handle * 2] = math.clamp(y, PREVIEW_Y_MIN, PREVIEW_Y_MAX)
 				if self:_applyBezier(b) then
-					self._dragChanged = true
 					self:_emit(false)
 				end
 			end,
 			onEnd = function(_pos: Vector2, _cancelled: boolean, _moved: boolean)
-				local changed = self._dragHandle ~= nil and self._dragChanged
 				self._dragHandle = nil
-				self._dragChanged = false
-				if changed then
-					self:_emit(true)
-				end
+				self:_finish()
 			end,
 		}, { threshold = 1 }))
 	end
@@ -877,11 +875,19 @@ end
 -- value -----------------------------------------------------------------------------------------------------------
 
 function EasingPicker._emit(self: EasingPicker, final: boolean)
+	self._pending = not final
 	self:_refresh()
 	self:_refreshPopup()
 	local onChange = self._props.onChange
 	if onChange then
 		onChange(deepCopy(self._value), final)
+	end
+end
+
+-- Closes earlier non-final reports with onChange(value, true) (nothing when there are none).
+function EasingPicker._finish(self: EasingPicker)
+	if self._pending then
+		self:_emit(true)
 	end
 end
 
@@ -942,12 +948,13 @@ function EasingPicker.choose(self: EasingPicker, def: any): boolean
 		self:setBezier(b[1], b[2], b[3], b[4], true)
 		return true
 	end
+	self:close() -- ends a running bezier gesture first (with its own final)
 	local changed = not sameValue(explicit, self._value)
 	self._value = explicit
 	self._mode = "styles"
-	self:close()
 	self:_refresh()
 	if changed then
+		self._pending = false
 		local onChange = self._props.onChange
 		if onChange then
 			onChange(explicit, true)
@@ -956,20 +963,29 @@ function EasingPicker.choose(self: EasingPicker, def: any): boolean
 	return true
 end
 
--- Bezier edit (fields, presets, programmatic). `final` defaults to true; onChange fires when the value changed or
--- when final is true (closing a scrub gesture).
+-- Bezier edit (fields, presets, programmatic). `final` defaults to true. onChange fires when the value changed;
+-- a final without a change only closes earlier non-final reports (a scrub whose last step equals the value).
+-- Ignored while disabled and for non-finite numbers.
 function EasingPicker.setBezier(self: EasingPicker, x1: number, y1: number, x2: number, y2: number, final: boolean?)
 	if not self._enabled then
 		return
+	end
+	for _, x in { x1, y1, x2, y2 } do
+		if type(x) ~= "number" or x ~= x or x == math.huge or x == -math.huge then
+			return
+		end
 	end
 	local isFinal = final ~= false
 	local changed = self:_applyBezier({ x1, y1, x2, y2 })
 	if self._open then
 		self:_applyMode()
 	end
-	if changed or isFinal then
+	if changed then
 		self:_emit(isFinal)
+	elseif isFinal and self._pending then
+		self:_emit(true)
 	else
+		self:_refresh()
 		self:_refreshPopup()
 	end
 end
@@ -990,7 +1006,11 @@ function EasingPicker.isDragging(self: EasingPicker): boolean
 	return self._dragHandle ~= nil
 end
 
+-- Disabling ends a running gesture with onChange(v, true) and closes the popup; the rest of the gesture is ignored.
 function EasingPicker.setEnabled(self: EasingPicker, enabled: boolean)
+	if not enabled and self._enabled then
+		self:_finish()
+	end
 	self._enabled = enabled
 	if not enabled then
 		self._hovered = false

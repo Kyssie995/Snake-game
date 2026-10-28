@@ -21,11 +21,13 @@
 	All shapes are non-interactive (Active = false, Interactable = false): they never swallow clicks meant for
 	handles below or above them. Colours default to Theme tokens.
 
-	Path2D (engine 0.745: SetControlPoints with Path2DControlPoint.new(UDim2, ...), Thickness, Color3) was
-	considered, but Path2DControlPoint cannot be constructed in Lune and Path2D is a GuiBase (no
-	Rotation/Size/ZIndex layering like GuiObjects), so the editors draw with Frames everywhere; this works the same
-	in Studio and in tests. Thousands of segments are fine for editor-sized curves (a 20-key sequence curve is
-	usually drawn with 64..200 segments).
+	Path2D (engine 0.745: SetControlPoints({ Path2DControlPoint.new(position: UDim2, leftTangent?: UDim2,
+	rightTangent?: UDim2) }), Thickness, Color3, Closed, ZIndex, Visible) was considered, but Path2DControlPoint
+	cannot be constructed in Lune, and Path2D is a GuiBase rather than a GuiObject: no Size, Rotation, Active or
+	Interactable, and its Transparency is RobloxScriptSecurity (plugins cannot fade a curve). So the editors draw
+	with Frames everywhere; this works the same in Studio and in tests. Hundreds of segments are fine for
+	editor-sized curves (a 20-key sequence curve is drawn with 19 segments plus a 64-column envelope band; a
+	CurveGraph view uses up to ~300).
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)

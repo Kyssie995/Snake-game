@@ -3,7 +3,8 @@
 Bausteine der Plugin-Oberfläche unter `src/Plugin/UI/Widgets/` (ein Widget pro Datei; jede Datei beginnt mit einem
 Kopfkommentar samt Beispiel). Grundlage sind `Theme`, `New`, `Maid` und `Input` aus `src/Plugin/UI/`
 (siehe [`PLUGIN_CONTRACTS.md`](PLUGIN_CONTRACTS.md) §9). Tests: `tests/specs/WidgetsControls.spec.luau`,
-`WidgetsLayout.spec.luau` und `WidgetsContract.spec.luau` (widgetübergreifender Vertrag).
+`WidgetsLayout.spec.luau` und `WidgetsContract.spec.luau` (widgetübergreifender Vertrag). Die Wert-Editoren unter
+`src/Plugin/UI/Editors/` (Farbwähler, Verläufe, Sequenzen, Easings, Kurven) beschreibt [§7](#7-editoren).
 
 ## 1. Gemeinsamer Vertrag
 
@@ -391,3 +392,251 @@ Gemeinsame Helfer der Widgets:
 * Ob Studio bei `inputThatCausedFocusLoss` wirklich das Escape-InputObject übergibt (davon hängt „Escape setzt
   zurück“ ab).
 * Das Dropdown ist nicht virtualisiert: Bei sehr langen Listen das Suchfeld nutzen oder einen Tree verwenden.
+
+## 7. Editoren
+
+Wert-Editoren unter `src/Plugin/UI/Editors/`, gebaut aus den Widgets oben. Sie arbeiten auf der **JSON-Form** der
+Werte, weil das Dokument JSON ist: Farben `"#RRGGBB"` oder `"$key"`, Sequenzen `[[t, v, e?], …]` bzw.
+`[[t, farbe], …]`, Easing-Definitionen und Keyframe-Listen. Umrechnen und Auswerten übernehmen `Codec`, `Curves` und
+`Easing` aus der Runtime. Tests: `tests/specs/EditorsColor.spec.luau`, `EditorsCurve.spec.luau` und
+`EditorsReview.spec.luau` (editorübergreifender Vertrag, Gesten, Ebenen, zufällige Gestenfolgen).
+
+### 7.1 Gemeinsamer Vertrag
+
+Es gilt der Vertrag aus §1 (Konstruktion, `host`, `setValue` ohne Callbacks, `destroy` idempotent, Theme-Farben).
+Dazu kommt:
+
+**Werte.**
+* Jeder gemeldete Wert ist kanonisch und gültig: `Codec.check` für Farben und Sequenzen, `Easing.check` für Easings,
+  sortierte Keyframes in den Grenzen für den CurveGraph.
+* Gemeldete und zurückgegebene Werte sind **Kopien**. Der Host darf sie behalten und verändern.
+* Ungültige Eingaben an die programmatischen Methoden (NaN, ±inf, ungültige Farben) werden ohne Fehler ignoriert.
+  Sie liefern dann `false` bzw. `nil`.
+
+**Gesten.**
+* Während des Ziehens oder Scrubbens kommt `onChange(v, false)`, danach **genau einmal** `onChange(v, true)`. Das
+  gilt auch bei Abbruch: Fokusverlust des Widgets, `setEnabled(false)`, `destroy()` oder ein Popup, das sich
+  schließt.
+* Diskrete Änderungen (Tippen, Vorlage, Hinzufügen, Entfernen) melden ein einziges `true`.
+* Änderungen ohne Wirkung melden **nichts**, damit kein leerer Undo-Schritt entsteht. Ein `final` ohne Änderung
+  schließt nur offene Zwischenmeldungen, z. B. einen Scrub, dessen letzter Schritt dem Wert entspricht.
+* Strukturänderungen (Keypoint hinzufügen oder entfernen, Vorlage, „Glätten“) beenden zuerst eine laufende Geste,
+  mit deren eigenem `final`. Danach kommt das `final` der Änderung.
+* `setEnabled(false)` beendet eine laufende Geste mit einem `final` und ignoriert ihren Rest. Im gesperrten Zustand
+  ändern auch die Methoden nichts, die wie der Nutzer handeln (`addKeypoint`, `setHex`, `choose` …).
+
+**Externe Änderungen.** `setValue` mit dem aktuellen Wert ist wirkungslos, damit ein Drag das Echo des Dokuments
+übersteht. Ändert `setValue` während einer Geste die Zahl der Keypoints bzw. Keys (z. B. Studio-Undo mitten im
+Drag), endet die Geste sofort mit `onChange(neuerWert, true)`. Der Rest der Geste wird ignoriert, ein offener
+Popup-Farbwähler schließt sich, ohne zu schreiben. Nur in diesem Fall ruft `setValue` einen Callback auf
+(GradientEditor, SequenceEditor, CurveGraph).
+
+**Maus und Ebenen.**
+* Alle Gesten laufen über `Input.drag` mit `host.widget`. Eine Heartbeat-Verbindung besteht nur, solange gezogen
+  wird.
+* Popups (ColorPicker, EasingPicker) legen ein transparentes Overlay auf `ControlKit.Z.popup` in `host.root` und
+  liegen selbst darüber (`Z.popup + 1`, mit `ControlKit.raise` auf den ganzen Teilbaum). Damit liegen sie über
+  Dialogen und Toasts und unter Tooltips.
+* Ein Popup schließt bei einem Klick oder Rechtsklick außerhalb, bei Fokusverlust des Widgets
+  (`WindowFocusReleased`), bei `setEnabled(false)`, bei `destroy()` und wenn sein Anker bzw. Besitzer zerstört wird.
+
+**Engine-Regeln** ([`research/api-particles-beams-trails.md`](research/api-particles-beams-trails.md)).
+* 2..20 Keypoints, der erste bei Zeit 0, der letzte bei 1, Envelope ≥ 0. Interpoliert wird linear, Farben in RGB.
+* Ob die Engine **gleiche Keypoint-Zeiten** annimmt, ist offen ([`ROBLOX_API_CONSTRAINTS.md`](ROBLOX_API_CONSTRAINTS.md)
+  DT-3 / U13, Entscheidung K3). Die Editoren erzeugen sie deshalb nie: Benachbarte Keypoints bleiben mindestens
+  0,001 auseinander (`MIN_GAP`). Dokumente, die schon gleiche Zeiten enthalten, werden unverändert angezeigt.
+
+**Gestaltung.** Theme-Farben wie in §1. Ausnahmen sind Nutzerinhalte (Farbchips, Verlaufsvorschau, Farbfeld) und
+technisch neutrales Weiß bzw. Schwarz unter `UIGradient`, das die Hintergrundfarbe multipliziert.
+
+### 7.2 Draw (intern)
+Kleiner Zeichenbaukasten aus Frames für Kurven, Linien, Marker und Raster.
+* Koordinaten sind Pixel-Offsets im lokalen Raum des Elternteils (oben links, y nach unten).
+  `Draw.toPixel` / `Draw.fromPixel(punkt, size, flipY?)` rechnen von und nach [0, 1]².
+* Positionen werden auf ganze Pixel gerundet, Längen aufgerundet. UDim-Offsets sind in der Engine ganzzahlig.
+* Alle Formen sind inert (`Active = false`, `Interactable = false`) und schlucken keine Klicks.
+* **API:** `line(parent?, p0, p1, dicke?, farbe?, style?)` (ein Frame, AnchorPoint 0,5, am Mittelpunkt, gedreht mit
+  `Rotation`), `setLine(line, p0, p1, dicke?, caps?)`, `polyline(parent?, punkte, dicke?, farbe?, style?)` (Container
+  „Polyline“ mit Kindern „Segment“, quadratische Enden gegen Lücken), `setPolyline(container, punkte, …)`
+  (verwendet Segmente wieder), `segmentCount`, `dot(parent?, mitte, radius, farbe?, style?)` (`hollow`, `stroke`),
+  `setDot`, `rect` / `setRect`, `grid(parent?, spalten, zeilen, { majorEvery, edges, … })` (per Scale positioniert,
+  folgt Größenänderungen), `clear`, `bezier(p0, c0, c1, p3, n)` (n + 1 Punkte), `segment(p0, p1, dicke, caps?)`.
+* Kein `Path2D`: `Path2DControlPoint` lässt sich in Lune nicht bauen, und `Path2D` ist ein `GuiBase` ohne Size,
+  Rotation und Active; seine `Transparency` ist RobloxScriptSecurity.
+```lua
+local curve = Draw.polyline(canvas, points, 2, Theme.colors.accent)
+Draw.setPolyline(curve, newPoints) -- während eines Drags, ohne neue Instanzen
+```
+
+### 7.3 ColorPicker
+HSV-Farbwähler: Sättigung/Helligkeit-Feld, Farbton-Leiste, Vorschau (alt | neu), Hex-Feld, R/G/B-Felder (0..255,
+scrubbar), Palette-Chips und zuletzt verwendete Farben.
+* `ColorPicker.new(props)` baut ihn inline. `ColorPicker.open(host, props)` öffnet ihn als Popup; je Host ist
+  höchstens eines offen. Es sitzt unter dem Anker, darüber, wenn unten kein Platz ist, und wird in `host.root`
+  geklemmt. Ohne Anker nimmt es `at` oder die Mausposition. Das Popup hat einen ×-Knopf.
+* **Werte:** Gemeldet wird immer `"#RRGGBB"` oder `"$key"`. `value` nimmt auch `"#RGB"`, `[r, g, b]` und `Color3`.
+  Das Hex-Feld nimmt `#RRGGBB`, `RRGGBB`, `#RGB` und `$key` der Palette. Ein Palette-Chip liefert `"$name"`.
+* **Gesten:** Drücken auf Feld oder Leiste springt dorthin (`false`), Ziehen folgt (`false`), Loslassen meldet
+  einmal `true`. Tippen, Chips und Zurücksetzen melden `true`, R/G/B-Scrubben `false` und dann `true`.
+* Der HSV-Zustand bleibt erhalten: Der Farbton übersteht Grau und Schwarz. Ein Klick auf die alte Hälfte der Vorschau
+  setzt auf die Ausgangsfarbe zurück.
+* Zuletzt verwendet: je `host.root`, höchstens 8, neueste zuerst, nur Hex-Werte. Eingetragen wird bei jedem `final`.
+* **Props:** `value`, `palette` (`{ name = "#RRGGBB" | Color3 }`), `host`, `showPreview` (true), `showRecent`
+  (true, braucht `host`), `width` (232), `size`, `enabled`. Nur Popup: `anchor`, `at`, `title` („Farbe“),
+  `onClose`.
+* **Callback:** `onChange(value, final)`.
+* **Methoden:** `getValue`, `getColor`, `getHex`, `getHSV`, `setHSV(h, s, v, final?)`, `setHex(text) -> bool`,
+  `setRGB(r, g, b, final?)`, `choosePalette(name) -> bool`, `chooseRecent(i) -> bool`, `revert`,
+  `setOriginal(value)` (nur Anzeige: Ausgangsfarbe für Vorschau und `revert`), `getRecent`, `isDragging`, `isOpen`,
+  `close`.
+* **Statisch:** `hsvToRgb`, `rgbToHsv`, `parseInput(text, palette?)`, `recent(host)`, `pushRecent(host, hex)`,
+  `MAX_RECENT` (8), `WIDTH` (232).
+```lua
+ColorPicker.open(host, { value = swatch:getValue(), anchor = swatch.instance,
+	onChange = function(v, final) swatch:commit(v, final) end })
+```
+
+### 7.4 GradientEditor
+Editor für `ColorSequence` in JSON-Form: Werkzeugleiste, Verlaufsleiste mit Griffen, darunter Farbe und Zeit des
+gewählten Keypoints.
+* **Werte:** Gemeldet wird `Codec.normalize("colorSequence", …)`. Zwei gleiche Keypoints werden zum Farbstring.
+  `$key` bleibt eine Referenz. Unbekannte Referenzen zeigt die Vorschau grau.
+* **Leiste** (`UIGradient` der dekodierten Sequenz): Drücken fügt einen Keypoint mit der dort ausgewerteten Farbe
+  hinzu (`Curves.evaluateColorSequence`) und wählt ihn. Ziehen vor dem Loslassen verschiebt ihn: eine Geste, ein
+  Undo-Schritt.
+* **Griffe:** Ein Klick wählt den Keypoint. Ziehen verschiebt die Zeit; der Greif-Versatz bleibt erhalten. Erster
+  und letzter Keypoint bleiben bei 0 und 1, die anderen mindestens 0,001 von ihren Nachbarn entfernt. Zeiten werden
+  auf 0,001 gerundet. Ein Rechtsklick entfernt den Keypoint, nie den ersten oder letzten und nie unter zwei.
+* **Werkzeugleiste:** Vorlagen (Einfarbig, Zweifarbig, Feuer, Eis, Energie; danach zeigt das Dropdown wieder seinen
+  Platzhalter), „+“ fügt in der Mitte der größten Lücke ein, „−“ entfernt den gewählten Keypoint. Am Limit ist „+“
+  gesperrt, ein Tooltip auf Knopf, Slot und Leiste erklärt das.
+* **Gewählter Keypoint:** Die Farbe kommt über das Farbfeld, das den Popup-ColorPicker öffnet, oder mit
+  `inlinePicker = true` über einen eingebetteten ColorPicker. Dessen Ausgangsfarbe ist die Farbe des Keypoints bei
+  der Auswahl. Die Zeit steht in einem NumberInput, dessen Bereich den Nachbarn folgt; für die Ränder ist es gesperrt.
+* Ein offenes Popup folgt seinem Keypoint, solange die Zahl der Keypoints gleich bleibt. Sonst schließt es, ohne zu
+  schreiben.
+* **Props:** `value` (Farbe oder `[[t, farbe], …]`), `palette`, `host`, `maxKeypoints` (2..20), `inlinePicker`
+  (false), `enabled`, `size`.
+* **Callbacks:** `onChange(value, final)`, `onSelect(index)`.
+* **Methoden:** `getValue`, `getKeypoints`, `keypointCount`, `getSequence`, `getSelected`, `getMaxKeypoints`,
+  `canAdd`, `canRemove(i)`, `addKeypoint(t, farbe?) -> index?`, `removeKeypoint(i) -> bool`,
+  `selectKeypoint(i) -> bool`, `setKeypointTime(i, t, final?) -> bool`, `setKeypointColor(i, farbe, final?) -> bool`,
+  `applyPreset(id) -> bool`, `openPicker()`, `setPalette(p)`, `isDragging`.
+* **Statisch:** `PRESETS`, `PRESET_VALUES`, `presetValue(id, keypoints?, selected?)`, `MAX_KEYPOINTS` (20), `MIN_GAP`
+  (0,001), `TIME_DECIMALS` (3), `LIMIT_TEXT`.
+* Werte mit mehr Keypoints als `maxKeypoints` werden unverändert gezeigt, Hinzufügen ist dann gesperrt. Ungültige
+  Werte erscheinen ohne Meldung als Weiß.
+```lua
+GradientEditor.new({ value = { { 0, "#FFFFFF" }, { 0.4, "#FFB23D" }, { 1, "$ember" } }, palette = palette,
+	host = host, onChange = function(v, final) ... end, parent = row })
+```
+
+### 7.5 SequenceEditor
+Kurveneditor für `NumberSequence` (Size, Transparency, Squash, WidthScale …) mit Envelope-Band.
+* **Werte:** `Codec.normalize("numberSequence", …, { min, max })`. Bei konstanter Kurve ist das eine Zahl, sonst
+  2..20 Keypoints `[t, v]` bzw. `[t, v, e]`. Mittlere Zeiten liegen mindestens `MIN_GAP` (0,001) auseinander, Werte in
+  `min..max`, Envelopes in `0..(max − min)`. `value` nimmt auch eine `NumberSequence`.
+* **Maus:**
+  * Einen Keypoint ziehen ändert Zeit und Wert, begrenzt auf die Ansicht.
+  * Alt-Ziehen oder die zwei Envelope-Griffe über und unter dem gewählten Keypoint ändern die Streuung (±).
+  * Doppelklick auf eine freie Stelle fügt einen Keypoint ein.
+  * Rechtsklick auf einen Keypoint entfernt ihn, Rechtsklick auf einen Griff setzt das Envelope zurück.
+  * Ein Klick ins Leere hebt die Auswahl auf.
+* **Werkzeugleiste:** Vorlagen (Konstant, Linear ein, Linear aus, Ein- und ausblenden, Puls, Ease-Out gebacken) auf
+  den Pegeln `presetLow` / `presetHigh`. „Glätten“ legt eine monotone kubische Kurve (PCHIP, ohne Überschwingen)
+  durch Werte und Envelopes und backt sie auf ≤ 20 lineare Keypoints (`Curves.bakeToSequenceKeypoints`). Rechts steht
+  die Anzeige n/20.
+* **Felder** unter dem Graphen: Zeit, Wert und ± des gewählten Keypoints. Die Zeit ist für die Ränder gesperrt.
+* **autoRange** (Standard, wenn `range` enger als die Grenzen ist): Die Ansicht wächst bis `max`, wenn die Daten nach
+  dem Loslassen oben anstoßen, und schrumpft zurück. Während eines Drags bleibt sie fest.
+* **Props:** `value`, `min` (0), `max` (1), `range`, `autoRange`, `precision` (3), `presetLow`, `presetHigh`,
+  `graphHeight` (140), `host`, `size`, `enabled`.
+* **Callbacks:** `onChange(value, final)`, `onSelect(index?)`.
+* **Methoden:** `setValue(v) -> bool` (ungültige Werte werden ignoriert), `getValue`, `getKeypoints` (Tripel),
+  `getKeypointCount`, `getSelected`, `selectKeypoint(i?)`, `addKeypoint(t, v?, e?) -> index?`,
+  `removeKeypoint(i) -> bool`, `setKeypointTime/Value/Envelope(i, x, final?)`, `applyPreset(id) -> bool`,
+  `smooth() -> maxError?`, `getRange` / `setRange(lo, hi)`, `getLimits`, `isDragging`. Testgeometrie:
+  `pointToPixel(t, v)`, `pixelToPoint(px)`, `handlePixels()`.
+* **Statisch:** `PRESETS`, `preset(id, low, high)`, `smoothKeypoints(keys, spec?, tol?)`, `MIN_GAP`, `MAX_KEYPOINTS`.
+```lua
+SequenceEditor.new({ value = { { 0, 1 }, { 0.3, 0 }, { 1, 1 } }, presetLow = 1, presetHigh = 0, host = host,
+	onChange = function(v, final) if final then editor:endGesture(true) else editor:updateGesture(...) end end })
+```
+
+### 7.6 EasingPicker
+Kompaktes Easing-Feld: ein Knopf mit Mini-Kurve (30 × 16), Name und ▾.
+* Ein Klick öffnet ein Popup in `host.root` mit zwei Seiten:
+  * „Stile“: 10 Stile × In/Out/InOut als Vorschaubilder, dazu Linear und Constant mit je einer breiten Zelle, zusammen
+    32 Zellen (`picker.cells["Quad.Out"]`).
+  * „Bezier“: Vorschau mit zwei ziehbaren Griffen, Felder x1/y1/x2/y2 und die CSS-Vorlagen ease, ease-in, ease-out
+    und ease-in-out.
+* **Werte:** Stile werden ausdrücklich als `"Stil.Richtung"` gemeldet (`"Quad"` wird zu `"Quad.Out"`), Linear und
+  Constant ohne Richtung. Beziers kommen als `{ bezier = { x1, y1, x2, y2 } }`: x in 0..1, y in −2..3, auf drei
+  Stellen gerundet. `Easing.normalize` schreibt `"Quad"`; wer Easings als Strings vergleicht, normalisiert vorher.
+* **Gesten:** Griffe ziehen und Felder scrubben melden `false` und dann einmal `true`, auch wenn das Popup mitten in
+  der Geste schließt. Eine Stilwahl meldet `true` und schließt das Popup. Im Bezier-Modus bleibt es offen.
+* **Schließen:** bei einer Stilwahl, einem Klick oder Rechtsklick außerhalb, Fokusverlust des Widgets, einem zweiten
+  Klick auf den Knopf, `setEnabled(false)`, `destroy()` und wenn der Knopf zerstört wird.
+* **Props:** `value` (`"Linear"`, `"Constant"`, `"Stil"`, `"Stil.Richtung"`, `{ bezier = … }`), `host`, `size`,
+  `enabled`.
+* **Callback:** `onChange(value, final)`.
+* **Methoden:** `setValue(def) -> bool`, `getValue` (Kopie), `choose(def) -> bool` (wie ein Klick),
+  `setBezier(x1, y1, x2, y2, final?)`, `applyPreset(name) -> bool`, `open`, `close`, `isOpen`,
+  `setMode("styles" | "bezier")`, `getMode`, `isDragging`. Testgeometrie: `handlePixel(1 | 2)`,
+  `previewPointToPixel(x, y)`, `previewPixelToPoint(px)`.
+* **Statisch:** `explicit(def)` (ausdrückliche JSON-Form oder nil), `label(def)` („ease-in-out“, „Bezier a, b, c,
+  d“), `CSS_PRESETS`, `STYLES`, `DIRECTIONS`.
+```lua
+EasingPicker.new({ value = key.easing, host = host, onChange = function(v) editor:setKeyEasing(track, i, v) end })
+```
+
+### 7.7 CurveGraph
+Wertkurve einer Zahlenspur für die Kurvenansicht der Timeline. Die Timeline besitzt das Dokument, der Graph meldet
+Änderungen.
+* **Zeichnen:** `Curves.compileTrack` und `Curves.evaluate`, etwa ein Sample je 3 px plus Samples direkt vor und an
+  jedem Key, damit Constant-Stufen scharf bleiben. Die Segmente werden selbst auf das Plot-Rechteck geclippt
+  (Liang–Barsky).
+* **Maus:**
+  * Klick auf einen Key wählt ihn (Shift fügt hinzu, Ctrl schaltet um). Ein Klick auf einen Key einer
+    Mehrfachauswahl reduziert die Auswahl auf ihn. Ein Klick ins Leere leert die Auswahl.
+  * Ziehen ins Leere ist eine Rahmenauswahl, mit Shift oder Ctrl additiv.
+  * Ziehen eines gewählten Keys verschiebt alle gewählten. `snap(time)` rastet den gegriffenen Key ein. Der
+    Zeitversatz ist so begrenzt, dass alle Keys in `0..duration` bleiben; Werte werden je Key auf `min..max`
+    geklemmt. Die Liste wird stabil neu sortiert, `onSelect` meldet die neuen Indizes.
+  * Bezier-Griffe erscheinen für Segmente mit `{ bezier }`-Easing und gewähltem Endpunkt. Bei flachen Segmenten
+    nehmen sie ein Viertel der Ansichtshöhe als Δv.
+  * Das Mausrad zoomt die Zeit um die Maus, Ctrl+Rad die Werte, Shift+Rad scrollt. Ziehen mit der mittleren Taste
+    verschiebt die Ansicht.
+* **Werte:** `onChange` meldet eine sortierte Kopie. Zusatzfelder der Keyframes bleiben erhalten. `deleteSelected()`
+  kann alle Keys entfernen und meldet dann `{}`; eine Spur ohne Keyframes ist ungültig (`track.keyframes`), der Host
+  entfernt dann die Spur. Keys hinzufügen (Doppelklick) und die Tastatur übernimmt die Timeline. Nur Zahlenkanäle.
+* **Props:** `keyframes`, `duration` (Zeitansicht 0..duration plus 3 %), `minValue` / `maxValue` (Wertansicht;
+  nil = automatisch aus den Daten samt Überschwingen, plus 10 %), `min` / `max` (harte Grenzen), `snap`,
+  `timePrecision` (3), `precision` (3), `color` (Theme-Token, Standard `pinColors.number`), `host`, `size`, `enabled`.
+* **Callbacks:** `onChange(keyframes, final)`, `onSelect(indices)`.
+* **Methoden:** `setKeyframes` / `setValue`, `getKeyframes` / `getValue`, `evaluate(t)`, `select(indices, mode)`
+  (`"replace"`, `"add"`, `"toggle"`, `"remove"`), `getSelection`, `clearSelection`, `moveSelected(dt, dv, final?)`,
+  `setEasing(i, def) -> bool`, `deleteSelected() -> Anzahl`, `getView` / `setView(t0, t1, v0?, v1?)`, `frameAll`,
+  `zoomTime(f, anker?)`, `zoomValue(f, anker?)`, `pan(dt, dv?)`, `setDuration`, `setSnap`, `setPlayhead(t?)`,
+  `isDragging`. Testgeometrie: `pointToPixel`, `pixelToPoint`, `handlePoint(i, 1 | 2)`, `handlePixel(i, 1 | 2)`.
+```lua
+CurveGraph.new({ keyframes = track.keyframes, duration = 2, min = 0, max = 1, host = host,
+	snap = function(t) return math.round(t * 30) / 30 end, onChange = function(kfs, final) ... end })
+```
+
+### 7.8 Nicht in Studio verifiziert
+
+* Darstellung der gedrehten Linien-Frames und die Rundung auf ganze Pixel (etwa 0,5 px Fehler). Ob
+  `ClipsDescendants` gedrehte Kinder sauber abschneidet (der CurveGraph clippt deshalb selbst).
+* Die `UIGradient`-Annahmen: Ein weißer Hintergrund zeigt den Verlauf unverändert, Kinder werden nicht eingefärbt
+  (der Rahmen der Verlaufsleiste ist deshalb ein eigener Frame).
+* Echte Mausgesten, die Reihenfolge von `Activated` und `InputEnded` beim Doppelklick (SequenceEditor) und ob ein
+  deaktivierter IconButton Hover-Ereignisse bekommt (der Limit-Tooltip des GradientEditor hängt deshalb zusätzlich an
+  Slot und Leiste).
+* Ob die Engine gleiche Keypoint-Zeiten annimmt (U13). Die Editoren erzeugen sie nicht.
+* Die Editoren haben keine Tastaturbedienung (keine Entf-Taste, kein Escape im Popup).
+* Zuletzt verwendete Farben liegen nur im Speicher (je `host.root`), nicht in den Plugin-Einstellungen.
+* Das EasingPicker-Popup braucht für die Bezier-Seite etwa 280 px Höhe. In kleineren Wurzeln wird die unterste Zeile
+  (CSS-Vorlagen) abgeschnitten; die Stile-Seite scrollt.
+* „Glätten“ und die Ease-Out-Vorlage haben nur 20 Keypoints. Bei mehreren scharfen Knicken bleibt ein Fehler von
+  bis zu etwa 1 % der Spanne.

@@ -31,8 +31,10 @@
 	* drag a bezier handle: edits that segment's easing (x clamped to 0..1, values rounded to 3 decimals).
 	* wheel: zoom time around the mouse; Ctrl+wheel: zoom values; Shift+wheel: scroll time. Middle-drag: pan.
 	Every edit gesture reports onChange(keyframes, false) for intermediate states and onChange(keyframes, true)
-	once at the end. setKeyframes() with the keyframes the graph reported last is a no-op (echo from the document),
-	so a gesture in progress keeps its mapping.
+	once at the end; edits that change nothing report nothing (no empty undo steps). setKeyframes() with keyframes
+	equal to the current ones is a no-op (the document echoing an edit), so a gesture in progress keeps its
+	mapping. deleteSelected() may remove every key and then reports {}: a track needs at least one keyframe
+	(Validation track.keyframes), so the host removes the track in that case.
 ]]
 
 local Theme = require(script.Parent.Parent.Theme)
@@ -110,7 +112,6 @@ type CurveGraphData = {
 	_keys: { Keyframe },
 	_selected: { [Keyframe]: boolean },
 	_lastIndices: { number },
-	_reported: { Keyframe }?,
 	_track: any, -- CompiledTrack?
 	_view: View,
 	_autoValue: boolean,
@@ -121,7 +122,7 @@ type CurveGraphData = {
 	_enabled: boolean,
 	_destroyed: boolean,
 	_drag: DragState?,
-	_dragChanged: boolean,
+	_pending: boolean, -- a non-final report has not been closed with final = true yet
 	_pan: View?,
 	_playhead: number?,
 	_handles: { { key: Keyframe, which: number, pixel: Vector2 } },
@@ -238,7 +239,14 @@ local function deepEqual(a: any, b: any): boolean
 end
 
 -- Liang–Barsky: the part of segment p0-p1 inside [x0, x1] × [y0, y1], or nil.
-local function clipSegment(p0: Vector2, p1: Vector2, x0: number, y0: number, x1: number, y1: number): (Vector2?, Vector2?)
+local function clipSegment(
+	p0: Vector2,
+	p1: Vector2,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number
+): (Vector2?, Vector2?)
 	local dx, dy = p1.X - p0.X, p1.Y - p0.Y
 	local u0, u1 = 0, 1
 	local function edge(p: number, q: number): boolean
@@ -263,12 +271,7 @@ local function clipSegment(p0: Vector2, p1: Vector2, x0: number, y0: number, x1:
 		end
 		return true
 	end
-	if
-		edge(-dx, p0.X - x0)
-		and edge(dx, x1 - p0.X)
-		and edge(-dy, p0.Y - y0)
-		and edge(dy, y1 - p0.Y)
-	then
+	if edge(-dx, p0.X - x0) and edge(dx, x1 - p0.X) and edge(-dy, p0.Y - y0) and edge(dy, y1 - p0.Y) then
 		return Vector2.new(p0.X + u0 * dx, p0.Y + u0 * dy), Vector2.new(p0.X + u1 * dx, p0.Y + u1 * dy)
 	end
 	return nil, nil
@@ -416,7 +419,6 @@ function CurveGraph.new(props: Props): CurveGraph
 		_keys = {},
 		_selected = {},
 		_lastIndices = {},
-		_reported = nil :: { Keyframe }?,
 		_track = nil :: any,
 		_view = { t0 = 0, t1 = 1, v0 = 0, v1 = 1 },
 		_autoValue = props.minValue == nil or props.maxValue == nil,
@@ -427,7 +429,7 @@ function CurveGraph.new(props: Props): CurveGraph
 		_enabled = props.enabled ~= false,
 		_destroyed = false,
 		_drag = nil :: DragState?,
-		_dragChanged = false,
+		_pending = false,
 		_pan = nil :: View?,
 		_playhead = nil :: number?,
 		_handles = {},
@@ -534,8 +536,7 @@ function CurveGraph._load(self: CurveGraph, keyframes: { Keyframe })
 		else
 			-- the keyframes changed under the gesture: end it (closing the host's gesture if it changed anything)
 			self._drag = nil
-			if self._dragChanged then
-				self._dragChanged = false
+			if self._pending then
 				self:_emit(true)
 			end
 		end
@@ -551,7 +552,8 @@ function CurveGraph._compile(self: CurveGraph)
 	local spec = table.clone(CHANNEL_SPEC) :: any
 	spec.min = self._props.min
 	spec.max = self._props.max
-	local ok, track = pcall(Curves.compileTrack :: any, { id = "curve", channel = "value", keyframes = self._keys }, spec)
+	local ok, track =
+		pcall(Curves.compileTrack :: any, { id = "curve", channel = "value", keyframes = self._keys }, spec)
 	if ok then
 		self._track = track
 	end
@@ -566,12 +568,9 @@ function CurveGraph.getKeyframes(self: CurveGraph): { Keyframe }
 	return out
 end
 
--- Replaces the keyframes without firing callbacks. The selection is kept by index. Passing the keyframes the
--- graph reported last (the document echoing an edit) changes nothing.
+-- Replaces the keyframes without firing callbacks. The selection is kept by index. Keyframes equal to the
+-- current ones (the document echoing an edit) change nothing, so a gesture in progress keeps its mapping.
 function CurveGraph.setKeyframes(self: CurveGraph, keyframes: { Keyframe })
-	if self._reported and deepEqual(keyframes, self._reported) then
-		return
-	end
 	if deepEqual(keyframes, self:getKeyframes()) then
 		return
 	end
@@ -595,10 +594,10 @@ function CurveGraph.evaluate(self: CurveGraph, t: number): number?
 end
 
 function CurveGraph._emit(self: CurveGraph, final: boolean)
+	self._pending = not final
 	self:_compile()
 	self:_render()
 	local out = self:getKeyframes()
-	self._reported = self:getKeyframes()
 	local onChange = self._props.onChange
 	if onChange then
 		onChange(out, final)
@@ -722,23 +721,31 @@ local function originsOf(self: CurveGraph): { [Keyframe]: Origin }
 end
 
 -- Moves the selected keys (programmatic drag): time offset dt (s), value offset dv. `final` defaults to true.
+-- Reports only changes; a final without a change closes earlier non-final reports. Ignored while disabled and for
+-- non-finite offsets.
 function CurveGraph.moveSelected(self: CurveGraph, dt: number, dv: number, final: boolean?)
-	if not self._enabled then
+	if not self._enabled or not finite(dt) or not finite(dv) then
 		return
 	end
 	local isFinal = final ~= false
 	local changed = self:_moveFrom(originsOf(self), dt, dv)
-	if changed or isFinal then
+	if changed then
 		self:_emit(isFinal)
 		self:_reportSelection()
+	elseif isFinal and self._pending then
+		self:_emit(true)
 	end
 end
 
--- Sets the easing of keyframe `index` (interpolation towards the next key). Fires onChange(keyframes, true).
+-- Sets the easing of keyframe `index` (interpolation towards the next key). Fires onChange(keyframes, true) when
+-- the easing changed. Returns false for invalid indices or easings and while disabled.
 function CurveGraph.setEasing(self: CurveGraph, index: number, easing: any): boolean
 	local key = self._keys[index]
 	if key == nil or not self._enabled or not Easing.check(easing) then
 		return false
+	end
+	if deepEqual(key.easing, easing) then
+		return true
 	end
 	key.easing = deepCopy(easing)
 	self:_emit(true)
@@ -913,10 +920,7 @@ end
 function CurveGraph._toLocal(self: CurveGraph, t: number, v: number): Vector2
 	local _, size = self:_plotGeometry()
 	local view = self._view
-	return Vector2.new(
-		(t - view.t0) / (view.t1 - view.t0) * size.X,
-		(1 - (v - view.v0) / (view.v1 - view.v0)) * size.Y
-	)
+	return Vector2.new((t - view.t0) / (view.t1 - view.t0) * size.X, (1 - (v - view.v0) / (view.v1 - view.v0)) * size.Y)
 end
 
 -- (time, value) -> widget-space pixel (what host.widget:GetRelativeMousePosition() reports).
@@ -1008,7 +1012,6 @@ end
 
 function CurveGraph._press(self: CurveGraph, pos: Vector2, mods: Input.Mods)
 	self._drag = nil
-	self._dragChanged = false
 	if not self._enabled then
 		return
 	end
@@ -1091,7 +1094,6 @@ function CurveGraph._dragMove(self: CurveGraph, pos: Vector2, delta: Vector2)
 			end
 		end
 		if self:_moveFrom(drag.origins, dt, dv) then
-			self._dragChanged = true
 			self:_emit(false)
 			self:_reportSelection()
 		end
@@ -1117,7 +1119,6 @@ function CurveGraph._dragMove(self: CurveGraph, pos: Vector2, delta: Vector2)
 		b[drag.which * 2] = roundTo(clamp(y, -1e3, 1e3), 3)
 		if b[1] ~= bezier[1] or b[2] ~= bezier[2] or b[3] ~= bezier[3] or b[4] ~= bezier[4] then
 			key.easing = { bezier = b }
-			self._dragChanged = true
 			self:_emit(false)
 		end
 	elseif drag.kind == "box" then
@@ -1142,14 +1143,11 @@ function CurveGraph._dragMove(self: CurveGraph, pos: Vector2, delta: Vector2)
 end
 
 function CurveGraph._dragEnd(self: CurveGraph)
-	local drag = self._drag
 	self._drag = nil
 	self.boxRect.Visible = false
-	if drag and self._dragChanged and (drag.kind == "keys" or drag.kind == "handle") then
-		self._dragChanged = false
-		self:_emit(true)
+	if self._pending then
+		self:_emit(true) -- key and handle drags (box selection reports no values)
 	end
-	self._dragChanged = false
 end
 
 function CurveGraph._click(self: CurveGraph, pos: Vector2, mods: Input.Mods)
@@ -1366,7 +1364,8 @@ function CurveGraph._renderKeys(self: CurveGraph, size: Vector2)
 			end)
 			local selected = self._selected[key] == true
 			diamond.Position = UDim2.fromOffset(p.X, p.Y)
-			diamond.BackgroundColor3 = if not enabled then c.textMuted
+			diamond.BackgroundColor3 = if not enabled
+				then c.textMuted
 				elseif selected then c.keyframeSelected
 				else c.keyframe
 			local outline = diamond:FindFirstChild("Outline") :: UIStroke?

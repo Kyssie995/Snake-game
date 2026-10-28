@@ -81,7 +81,7 @@ return function(T: any, use: (string) -> any, _ctx: any)
 			for _, componentType in Components.types() do
 				expect(seen[componentType]).toBe(true)
 			end
-			expect(#Components.types()).toBe(15)
+			expect(#Components.types()).toBe(17)
 			-- disabled group + child are gone; everything else is built at High
 			expect(ids(compiled)).toEqual({
 				"pivot",
@@ -100,6 +100,8 @@ return function(T: any, use: (string) -> any, _ctx: any)
 				"rocks",
 				"bolt",
 				"ultra",
+				"shake",
+				"impactFrame",
 			})
 		end)
 

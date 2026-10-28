@@ -6,8 +6,13 @@
 	Common.newPart / Common.newAttachment (consistent, physics-free, non-colliding instances), start its
 	controller from Common.controller (no-op defaults for every ComponentInstance method) and its cost
 	estimate from Common.cost.
+
+	Camera components (cameraShake, screenFlash) reach engine services only through Core/Env
+	(Common.tryService / Common.hasLocalPlayer / Common.currentCamera), so specs can substitute clients, servers and
+	cameras with Env.override.
 ]]
 
+local Env = require(script.Parent.Parent.Env)
 local Types = require(script.Parent.Parent.Types)
 
 type PropertySpec = Types.PropertySpec
@@ -148,6 +153,38 @@ function Common.newAttachment(ctx: BuildContext, componentId: string, name: stri
 	ctx.tagInstance(attachment, componentId)
 	attachment.Parent = parent or ctx.root
 	return attachment
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Run-context helpers (camera components)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- The service `name` through Env (overrides win), or nil when it is unavailable (e.g. no DataModel in the CLI).
+function Common.tryService(name: string): any
+	local ok, service = pcall(Env.getService :: any, name)
+	return if ok then service else nil
+end
+
+-- True when this machine has a local player (Players.LocalPlayer ~= nil): a client. False on servers, in Studio
+-- edit mode (no LocalPlayer) and when the Players service is unavailable.
+function Common.hasLocalPlayer(): boolean
+	local ok, player = pcall(function(): any
+		local players: any = Env.getService("Players")
+		return players.LocalPlayer
+	end)
+	return ok and player ~= nil
+end
+
+-- `workspaceService.CurrentCamera` (the local player's / Studio's camera), or nil.
+function Common.currentCamera(workspaceService: any): Camera?
+	if workspaceService == nil then
+		return nil
+	end
+	local camera = workspaceService.CurrentCamera
+	if typeof(camera) == "Instance" and camera:IsA("Camera") then
+		return camera
+	end
+	return nil
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────

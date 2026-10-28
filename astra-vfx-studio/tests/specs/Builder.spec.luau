@@ -168,9 +168,16 @@ return function(T: any, use: (string) -> any, ctx: any)
 				local built = Builder.build(compiled)
 				local total = 0
 				for _, c in compiled.components do
-					local cost = Components.get(c.type).estimateCost(c, compiled.quality)
+					local descriptor = Components.get(c.type)
+					local cost = descriptor.estimateCost(c, compiled.quality)
 					local list = owned(built.container, c.id)
 					local label = level .. " " .. c.id
+					if descriptor.category == "Camera" then
+						-- Camera components own nothing in the container (screenFlash's post effect lives under the
+						-- camera while it shows; ComponentsCamera.spec counts it there).
+						cost = table.clone(cost)
+						cost.instances = 0
+					end
 					expect({ label, #list }).toEqual({ label, cost.instances })
 					expect({ label, countClass(list, "BasePart") }).toEqual({ label, cost.parts })
 					expect({ label, countClass(list, "Attachment") }).toEqual({ label, cost.attachments })

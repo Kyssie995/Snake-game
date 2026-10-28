@@ -6,7 +6,7 @@
 	This spec checks the contracts every descriptor shares, generically over the whole registry, so a new or changed
 	descriptor cannot silently break one of them:
 
-	  * the registry holds exactly the 15 types of docs/COMPONENTS_SPEC.md, one file per type (PascalCase name);
+	  * the registry holds exactly the 17 types of docs/COMPONENTS_SPEC.md, one file per type (PascalCase name);
 	  * an independent transcription of every property table (keys in order, kinds, defaults, ranges, scale /
 	    quality / advanced flags, explicit enum lists), every channel list and every event list of the spec;
 	  * PropertySpec / ChannelSpec / EventSpec well-formedness, Codec round trips of every default, channel ↔
@@ -18,6 +18,13 @@
 	    across frame histories, nothing emitted or played while seeking, destroy leaves nothing behind.
 
 	Lune has no renderer: "visible" means Transparency < 1 / Enabled = true on the built instances.
+
+	Camera types (cameraShake, screenFlash — COMPONENTS_SPEC §17-18) draw through workspace.CurrentCamera instead of
+	the container. Every test therefore runs against a fresh test Camera (Env.override("Workspace")), and in Lune as
+	a client (Env.override("Players") with a LocalPlayer; render-step bindings through the fakes, stepped by
+	`step()` below). "Owned" instances include tagged instances under that camera, snapshots include the camera
+	CFrame and "visible" also counts an enabled ColorCorrectionEffect or a moved camera. In-depth camera specs
+	(server no-op, envelopes, falloff, bindings): ComponentsCamera.spec.
 ]]
 
 type Row = {
@@ -71,8 +78,8 @@ local function with(base: { [string]: string }, extra: { [string]: string }): { 
 	return out
 end
 
--- docs/COMPONENTS_SPEC.md §1–§15, transcribed independently of the descriptors. `enum` is given where the spec
--- lists the names explicitly; `enumType` where the spec names the Roblox Enum.
+-- docs/COMPONENTS_SPEC.md §1–§15 and §17–§18, transcribed independently of the descriptors. `enum` is given where
+-- the spec lists the names explicitly; `enumType` where the spec names the Roblox Enum.
 local SPEC: { [string]: TypeSpec } = {
 	group = {
 		category = "Structure",
@@ -446,7 +453,42 @@ local SPEC: { [string]: TypeSpec } = {
 		},
 		events = { "regenerate" },
 	},
+	cameraShake = {
+		category = "Camera",
+		properties = {
+			P("amplitude", "number", 0.6, 0, 20),
+			P("positionAmplitude", "number", 0.15, 0, 10, "L"),
+			P("frequency", "number", 18, 0.1, 60),
+			P("attack", "number", 0.02, 0, 5),
+			P("decay", "number", 0.35, 0, 10),
+			P("decayEasing", "string", "Quad.Out"),
+			P("rotationWeights", "vector3", { 1, 0.6, 0.3 }, 0, 1),
+			P("innerRadius", "number", 20, 0, 10000, "L"),
+			P("outerRadius", "number", 120, 0, 10000, "L"),
+			P("previewInStudio", "boolean", false),
+		},
+		channels = { position = "vector3", amplitude = "number" },
+		events = {},
+	},
+	screenFlash = {
+		category = "Camera",
+		properties = {
+			P("brightness", "number", 0.35, -1, 2),
+			P("contrast", "number", 0.8, -1, 3),
+			P("saturation", "number", -0.6, -1, 2),
+			P("tint", "color3", "#FFFFFF"),
+			P("attack", "number", 0.02, 0, 2),
+			P("hold", "number", 0.05, 0, 2),
+			P("decay", "number", 0.18, 0.01, 5),
+			P("previewInStudio", "boolean", true),
+		},
+		channels = { tint = "color3" },
+		events = {},
+	},
 }
+
+-- §17-18: camera types render through the current camera (never into the container or a viewport).
+local CAMERA_TYPES = { cameraShake = true, screenFlash = true }
 
 -- §0: only geometry types render in a ViewportFrame (lightning switches to part render there).
 local VIEWPORT_TYPES = {
@@ -470,7 +512,8 @@ local NON_CANONICAL_DEFAULTS = {
 	["particles.flipbookFramerate"] = 1,
 }
 
--- Class of controller.instances[1] (the "main" instance) in a runtime build with defaults.
+-- Class of controller.instances[1] (the "main" instance) in a runtime build with defaults. Camera types build
+-- nothing up front (screenFlash creates its effect only while it shows).
 local MAIN_CLASS = {
 	particles = "ParticleEmitter",
 	beam = "Beam",
@@ -488,9 +531,9 @@ local MAIN_CLASS = {
 	lightning = "Beam",
 }
 
--- Local time at which a default build is visibly active (flash fades out after 0.3 s, radialBurst is degenerate
--- at u = 0 and u = 1).
-local VISIBLE_AT: { [string]: number } = { flash = 0.04 }
+-- Local time at which a default build is visibly active (flash fades out after 0.3 s, screenFlash after 0.25 s,
+-- radialBurst is degenerate at u = 0 and u = 1).
+local VISIBLE_AT: { [string]: number } = { flash = 0.04, screenFlash = 0.04 }
 
 -- Property variants whose instance structure differs from the defaults (cost counts must still be exact).
 local VARIANTS: { [string]: { { [string]: any } } } = {
@@ -505,6 +548,15 @@ local VARIANTS: { [string]: { { [string]: any } } } = {
 	lightning = { { render = "part" }, { branchLength = 0 }, { branches = 0, segments = 2 } },
 	mesh = { { meshType = "FileMesh" } },
 	sound = { { soundId = "rbxassetid://1" } },
+	cameraShake = { { previewInStudio = true, innerRadius = 0, outerRadius = 50 } },
+	screenFlash = { { tint = "#FF2040", attack = 0 } },
+}
+
+-- Properties that make a default build show something in every mode (sound needs an id; the camera shake's
+-- Studio preview is opt-in).
+local SHOW_PROPS: { [string]: { [string]: any } } = {
+	sound = { soundId = "rbxassetid://1" },
+	cameraShake = { previewInStudio = true },
 }
 
 -- Properties read from built instances for snapshots and the "no redundant writes" check.
@@ -547,12 +599,14 @@ local WATCHED: { { any } } = {
 	{ "SurfaceLight", { "Range", "Angle" } },
 	{ "Sound", { "Volume", "PlaybackSpeed", "Looped" } },
 	{ "SpecialMesh", { "Scale", "Offset", "VertexColor" } },
+	{ "ColorCorrectionEffect", { "Enabled", "Brightness", "Contrast", "Saturation", "TintColor" } },
 }
 
 return function(T: any, use: (string) -> any, ctx: any)
 	local Harness = use("Tests.Specs.Helpers.ComponentHarness")
 	local Components = use("AstraVFX.Core.Components")
 	local Codec = use("AstraVFX.Core.Codec")
+	local Env = use("AstraVFX.Core.Env")
 	local expect = T.expect
 	local isLune = ctx.environment == "lune"
 	local fakes = ctx.fakes
@@ -587,6 +641,24 @@ return function(T: any, use: (string) -> any, ctx: any)
 		return h
 	end
 
+	-- Test camera for the camera types (see header); Lune also simulates a client. `cameraHome` is the CFrame the
+	-- camera holds after the assignment (Lune's property storage rounds CFrames on the first write).
+	local CAMERA_START = CFrame.new(0, 5, 20) * CFrame.Angles(-0.2, 0, 0)
+	local camera: Camera? = nil
+	local cameraHome = CAMERA_START
+
+	T.beforeEach(function()
+		local cam = Instance.new("Camera")
+		cam.Name = "RegistryTestCamera"
+		cam.CFrame = CAMERA_START
+		cameraHome = cam.CFrame
+		camera = cam
+		Env.override("Workspace", { CurrentCamera = cam })
+		if isLune then
+			Env.override("Players", { LocalPlayer = { Name = "RegistryTestPlayer" } })
+		end
+	end)
+
 	T.afterEach(function()
 		for _, h in open do
 			h:cleanup()
@@ -594,6 +666,12 @@ return function(T: any, use: (string) -> any, ctx: any)
 		table.clear(open)
 		if fakes then
 			fakes:reset()
+		end
+		Env.override("Workspace", nil)
+		Env.override("Players", nil)
+		if camera then
+			camera:Destroy()
+			camera = nil
 		end
 	end)
 
@@ -628,10 +706,27 @@ return function(T: any, use: (string) -> any, ctx: any)
 		return out
 	end
 
-	-- Rows of "Class Name.Property=value" for every watched property of the component's instances.
+	-- Instances of a component: tagged ones below the container plus (camera types) below the test camera.
+	local function owned(h: any, componentId: string): { Instance }
+		local out = h:instancesOf(componentId)
+		if camera then
+			for _, inst in camera:GetDescendants() do
+				if inst:GetAttribute("AstraComponent") == componentId then
+					table.insert(out, inst)
+				end
+			end
+		end
+		return out
+	end
+
+	-- Rows of "Class Name.Property=value" for every watched property of the component's instances, plus the test
+	-- camera's CFrame (only camera types ever change it).
 	local function snapshot(h: any, componentId: string, skip: { [string]: boolean }?): string
 		local rows = {}
-		for _, inst: any in h:instancesOf(componentId) do
+		if camera then
+			table.insert(rows, "Camera.CFrame=" .. tostring(camera.CFrame))
+		end
+		for _, inst: any in owned(h, componentId) do
 			for _, entry in WATCHED do
 				local class: string, props: { string } = entry[1], entry[2]
 				if inst:IsA(class) then
@@ -654,7 +749,8 @@ return function(T: any, use: (string) -> any, ctx: any)
 		return h:frame(localTime, if seeking then 0 else 1 / 60, seeking)
 	end
 
-	-- One Player frame (setTransform → update → flush) at `localTime` with the component at `cf`.
+	-- One Player frame (setTransform → update → flush, then the render-step bindings in Lune) at `localTime` with
+	-- the component at `cf`.
 	local function step(h: any, c: any, localTime: number, cf: CFrame?, seeking: boolean?): any
 		local f = frameAt(h, localTime, seeking)
 		local local_ = cf or CFrame.new()
@@ -663,6 +759,9 @@ return function(T: any, use: (string) -> any, ctx: any)
 			c:update(localTime, f)
 		end
 		h:flush(f)
+		if fakes then
+			fakes:renderStep(f.dt)
+		end
 		return f
 	end
 
@@ -729,7 +828,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 			shadowLights = 0,
 			sounds = 0,
 		}
-		for _, inst: any in h:instancesOf(componentId) do
+		for _, inst: any in owned(h, componentId) do
 			n.instances += 1
 			if inst:IsA("BasePart") then
 				n.parts += 1
@@ -755,16 +854,26 @@ return function(T: any, use: (string) -> any, ctx: any)
 
 	local function visibleCount(h: any, componentId: string): number
 		local n = 0
-		for _, inst: any in h:instancesOf(componentId) do
+		for _, inst: any in owned(h, componentId) do
 			if inst:IsA("BasePart") then
 				if inst.Transparency < 1 then
 					n += 1
 				end
-			elseif inst:IsA("ParticleEmitter") or inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("Light") then
+			elseif
+				inst:IsA("ParticleEmitter")
+				or inst:IsA("Beam")
+				or inst:IsA("Trail")
+				or inst:IsA("Light")
+				or inst:IsA("PostEffect")
+			then
 				if inst.Enabled then
 					n += 1
 				end
 			end
+		end
+		-- a shaken camera
+		if camera and camera.CFrame ~= cameraHome then
+			n += 1
 		end
 		return n
 	end
@@ -778,8 +887,8 @@ return function(T: any, use: (string) -> any, ctx: any)
 	-- ─────────────────────────────────────────────────────────────────────────
 
 	T.describe("registry", function()
-		T.it("contains exactly the 15 component types of docs/COMPONENTS_SPEC.md, sorted by type", function()
-			expect(#EXPECTED_TYPES).toBe(15)
+		T.it("contains exactly the 17 component types of docs/COMPONENTS_SPEC.md, sorted by type", function()
+			expect(#EXPECTED_TYPES).toBe(17)
 			expect(Components.types()).toEqual(EXPECTED_TYPES)
 			local listed = {}
 			for _, d in Components.list() do
@@ -1084,7 +1193,11 @@ return function(T: any, use: (string) -> any, ctx: any)
 					expect(props.color.kind).toBe("color3")
 				end
 				local tint = Components.channelSpec(typeName, "tint")
-				if tint then
+				if tint and CAMERA_TYPES[typeName] then
+					-- screenFlash: the channel is the TintColor itself; its rest value is the `tint` property.
+					expect(tint.baseProperty).toBe("tint")
+					expect(props.tint.kind).toBe("color3")
+				elseif tint then
 					expect(props.color.kind).toBe("colorSequence")
 					expect(tint.baseProperty).toBeNil()
 				end
@@ -1141,7 +1254,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 						local h = harness()
 						local c, component = h:build(typeName, nil, mode(modeName))
 						local tagged = {}
-						for _, inst in h:instancesOf(component.id) do
+						for _, inst in owned(h, component.id) do
 							tagged[inst] = true
 						end
 						local listed = {}
@@ -1151,7 +1264,9 @@ return function(T: any, use: (string) -> any, ctx: any)
 						expect(listed).toEqual(tagged)
 						expect(c.component).toBe(component)
 						expect(c.anchor).toBeNil()
-						if typeName ~= "group" and modeName == "runtime" then
+						if CAMERA_TYPES[typeName] then
+							expect(#c.instances).toBe(0)
+						elseif typeName ~= "group" and modeName == "runtime" then
 							expect(c.instances[1].ClassName).toBe(MAIN_CLASS[typeName])
 						end
 						-- Nothing outside the container, nothing under the container except tagged instances + Root.
@@ -1166,7 +1281,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 				T.it(modeName .. ": parts are anchored and physics-free", function()
 					local h = harness()
 					local _, component = h:build(typeName, nil, mode(modeName))
-					for _, inst: any in h:instancesOf(component.id) do
+					for _, inst: any in owned(h, component.id) do
 						if inst:IsA("BasePart") then
 							expect(inst.Anchored).toBe(true)
 							expect(inst.CanCollide).toBe(false)
@@ -1178,10 +1293,10 @@ return function(T: any, use: (string) -> any, ctx: any)
 
 				T.itIf(isLune, modeName .. ": invisible / disabled / silent until setActive(true)", function()
 					local h = harness()
-					local props = if typeName == "sound" then { soundId = "rbxassetid://1" } else nil
-					local c, component = h:build(typeName, props, mode(modeName))
+					local c, component = h:build(typeName, SHOW_PROPS[typeName], mode(modeName))
 					step(h, c, visibleAt)
-					for _, inst: any in h:instancesOf(component.id) do
+					expect(fakes:renderBindingCount()).toBe(0)
+					for _, inst: any in owned(h, component.id) do
 						if inst:IsA("BasePart") then
 							expect(inst.Transparency).toBe(1)
 						elseif
@@ -1202,8 +1317,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 
 				T.itIf(isLune, modeName .. ": shows (or plays) something once active", function()
 					local h = harness()
-					local props = if typeName == "sound" then { soundId = "rbxassetid://1" } else nil
-					local c, component = h:build(typeName, props, mode(modeName))
+					local c, component = h:build(typeName, SHOW_PROPS[typeName], mode(modeName))
 					c:setActive(true, frameAt(h, visibleAt))
 					step(h, c, visibleAt)
 					if typeName == "group" then
@@ -1216,6 +1330,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 					c:setActive(false, frameAt(h, visibleAt))
 					step(h, c, visibleAt)
 					expect(visibleCount(h, component.id)).toBe(0)
+					expect(fakes:renderBindingCount()).toBe(0)
 				end)
 
 				if modeName == "viewport" then
@@ -1230,8 +1345,12 @@ return function(T: any, use: (string) -> any, ctx: any)
 					)
 				end
 
+				-- Camera types are counted while they show (screenFlash's effect exists only then); at runtime that
+				-- needs the simulated client (Lune).
+				local countable = not CAMERA_TYPES[typeName] or modeName == "preview" or isLune
 				if modeName ~= "viewport" and not (typeName == "group" and modeName == "preview") then
-					T.it(
+					T.itIf(
+						countable,
 						modeName .. ": estimateCost counts match the built instances exactly (defaults and variants)",
 						function()
 							local variants: { { [string]: any } } = { {} }
@@ -1243,7 +1362,11 @@ return function(T: any, use: (string) -> any, ctx: any)
 								for _, quality in { HIGH, LOW } do
 									local h = harness()
 									local options = merge(mode(modeName), { quality = quality })
-									local _, component = h:build(typeName, props, options)
+									local c, component = h:build(typeName, props, options)
+									if CAMERA_TYPES[typeName] then
+										c:setActive(true, frameAt(h, visibleAt))
+										step(h, c, visibleAt)
+									end
 									local cost = descriptor.estimateCost(component, quality)
 									local actual = counts(h, component.id)
 									for key, value in actual do
@@ -1251,6 +1374,8 @@ return function(T: any, use: (string) -> any, ctx: any)
 											typeName .. "." .. key .. "=" .. tostring(value)
 										)
 									end
+									-- builds of one test share the test camera: leave it to the next variant
+									c:destroy()
 								end
 							end
 						end
@@ -1281,8 +1406,12 @@ return function(T: any, use: (string) -> any, ctx: any)
 					c:setActive(false, frameAt(h, 1))
 					c:destroy()
 					expect(#c.instances).toBe(0)
-					expect(#h:instancesOf(component.id)).toBe(0)
+					expect(#owned(h, component.id)).toBe(0)
 					expect(#h.container:GetChildren()).toBe(1) -- only the Root part is left
+					-- camera types: nothing left under the camera, camera restored, no render-step binding leaked
+					expect(#(camera :: Camera):GetChildren()).toBe(0)
+					expect((camera :: Camera).CFrame).toBe(cameraHome)
+					expect(fakes:renderBindingCount()).toBe(0)
 					c:destroy() -- a second destroy is harmless
 				end)
 			end
@@ -1320,6 +1449,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 						end
 						step(h, c, visibleAt)
 						expect(snapshot(h, component.id)).toBe(before)
+						c:destroy() -- the builds share the test camera
 					end
 				end
 			end)
@@ -1352,7 +1482,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 						h:flush(frame())
 						-- Overwrite every watched property with a sentinel: a redundant write would restore the real value.
 						local sentinels = {}
-						for _, inst: any in h:instancesOf(component.id) do
+						for _, inst: any in owned(h, component.id) do
 							for _, entry in WATCHED do
 								local class: string, props: { string } = entry[1], entry[2]
 								if inst:IsA(class) then
@@ -1402,7 +1532,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 				c:setActive(true, frameAt(h, visibleAt))
 				step(h, c, visibleAt)
 				local before = {}
-				for _, inst: any in h:instancesOf(component.id) do
+				for _, inst: any in owned(h, component.id) do
 					if inst:IsA("BasePart") then
 						before[inst] = inst.CFrame
 					end
@@ -1480,7 +1610,9 @@ return function(T: any, use: (string) -> any, ctx: any)
 						end
 						step(h, c, t, if entry[4] then CFrame.new(9, 9, 9) else cf, entry[3] == true)
 					end
-					return snapshot(h, component.id)
+					local state = snapshot(h, component.id)
+					c:destroy() -- the runs share the test camera
+					return state
 				end
 				local direct: { { any } } = { { 0.7, "on" } }
 				local winding: { { any } } = {
@@ -1496,9 +1628,11 @@ return function(T: any, use: (string) -> any, ctx: any)
 					{ 0.7 },
 				}
 				expect(run(winding, 4242)).toBe(run(direct, 4242))
-				-- Same seed, same result; the procedural types with randomness depend on the seed.
+				-- Same seed, same result; the procedural types with randomness depend on the seed (the camera shake's
+				-- noise phases too — visible here when it runs as the simulated Lune client).
 				expect(run(direct, 4242)).toBe(run(direct, 4242))
-				if typeName == "radialBurst" or typeName == "debris" or typeName == "lightning" then
+				local seeded = typeName == "radialBurst" or typeName == "debris" or typeName == "lightning"
+				if seeded or (typeName == "cameraShake" and isLune) then
 					expect(run(direct, 4242)).never.toBe(run(direct, 77))
 				else
 					expect(run(direct, 4242)).toBe(run(direct, 77))
@@ -1526,7 +1660,7 @@ return function(T: any, use: (string) -> any, ctx: any)
 					end
 				end
 				expect(plays).toBe(0)
-				for _, inst: any in h:instancesOf(component.id) do
+				for _, inst: any in owned(h, component.id) do
 					if inst:IsA("ParticleEmitter") then
 						expect(inst.Enabled).toBe(false)
 					end

@@ -680,14 +680,15 @@ return function(T: any, use: (string) -> any, ctx: any)
 			T.expect(finals(log)).toBe(1)
 			T.expect(log[#log][2]).toBe(true)
 			expectValid("colorSequence", log)
-			-- at time 0 and 1 the new keypoint goes inside the fixed end points
+			-- at time 0 and 1 the new keypoint goes inside the fixed end points, one step (MIN_GAP) away: the editor
+			-- never creates equal times (engine question U13)
 			editor:addKeypoint(0)
 			editor:addKeypoint(1)
 			local all = times(editor)
 			T.expect(all[1]).toBe(0)
-			T.expect(all[2]).toBe(0)
+			T.expect(all[2]).toBe(GradientEditor.MIN_GAP)
 			T.expect(all[#all]).toBe(1)
-			T.expect(all[#all - 1]).toBe(1)
+			T.expect(all[#all - 1]).toBe(1 - GradientEditor.MIN_GAP)
 			T.expect(Codec.check("colorSequence", editor:getValue())).toBe(true)
 			editor:destroy()
 		end)
@@ -711,18 +712,18 @@ return function(T: any, use: (string) -> any, ctx: any)
 			T.expect(log[3]).toEqual(L(editor:getValue(), true))
 			T.expect(editor.handles[2].button.Position).toEqual(UDim2.new(0.45, 0, 0, 0))
 			T.expect(heartbeatCount()).toBe(baseline)
-			-- clamped at the right neighbour (equal times are allowed by the engine: a hard edge)
+			-- stops one step (MIN_GAP) before the right neighbour: no equal times (engine question U13)
 			table.clear(log)
 			drag(host, editor.handles[2].button, Vector2.new(45, 8), { Vector2.new(95, 8) })
-			T.expect(times(editor)).toEqual({ 0, 0.6, 0.6, 1 })
+			T.expect(times(editor)).toEqual({ 0, 0.599, 0.6, 1 })
 			drag(host, editor.handles[3].button, Vector2.new(60, 8), { Vector2.new(-200, 8) })
-			T.expect(times(editor)).toEqual({ 0, 0.6, 0.6, 1 }) -- cannot pass its left neighbour either
+			T.expect(times(editor)).toEqual({ 0, 0.599, 0.6, 1 }) -- cannot reach its left neighbour either
 			T.expect(finals(log)).toBe(1) -- the second drag changed nothing, so it reported nothing
 			-- the ends only select
 			table.clear(log)
 			drag(host, editor.handles[1].button, Vector2.new(0, 8), { Vector2.new(30, 8) })
 			drag(host, editor.handles[4].button, Vector2.new(100, 8), { Vector2.new(50, 8) })
-			T.expect(times(editor)).toEqual({ 0, 0.6, 0.6, 1 })
+			T.expect(times(editor)).toEqual({ 0, 0.599, 0.6, 1 })
 			T.expect(#log).toBe(0)
 			T.expect(editor:getSelected()).toBe(4)
 			T.expect(editor.handles[4].stroke.Color).toEqual(colors.accent)
@@ -836,13 +837,13 @@ return function(T: any, use: (string) -> any, ctx: any)
 			fire(box, "FocusLost", true, nil)
 			T.expect(times(editor)).toEqual({ 0, 0.25, 0.8, 1 })
 			T.expect(log).toEqual(L(L(editor:getValue(), true)))
-			box.Text = "0.95" -- beyond the right neighbour: clamped
+			box.Text = "0.95" -- beyond the right neighbour: clamped one step (MIN_GAP) before it
 			fire(box, "FocusLost", true, nil)
-			T.expect(times(editor)).toEqual({ 0, 0.8, 0.8, 1 })
+			T.expect(times(editor)).toEqual({ 0, 0.799, 0.8, 1 })
 			-- scrubbing the time field: false while scrubbing, one final
 			table.clear(log)
 			drag(host, editor.timeInput.scrub, Vector2.new(5, 5), { Vector2.new(0, 5), Vector2.new(-25, 5) })
-			T.expect(times(editor)).toEqual({ 0, 0.5, 0.8, 1 }) -- 0.8 - 30 px × 0.01
+			T.expect(times(editor)).toEqual({ 0, 0.499, 0.8, 1 }) -- 0.799 - 30 px × 0.01
 			T.expect(finals(log)).toBe(1)
 			T.expect(log[#log][2]).toBe(true)
 			-- programmatic

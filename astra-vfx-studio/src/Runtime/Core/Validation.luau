@@ -123,7 +123,7 @@
 
 	  Graph: every graph.* code of Graph.validate (see Core/Graph/Validator.luau), passed through unchanged.
 
-	  Lints (warnings; skipped for disabled components)
+	  Lints (warnings; only for built components: enabled and no disabled ancestor)
 	  warning  lint.trail_static       trail without a movement source: no position/rotation track (>= 2 keys), no
 	                                   spin and no graph Tween/SetProperty of position/rotation on the trail or any
 	                                   ancestor (it only draws when the effect is attached to something moving)

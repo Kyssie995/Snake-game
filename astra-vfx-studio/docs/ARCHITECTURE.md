@@ -141,6 +141,8 @@ Wesentliche Konventionen:
 | `radialBurst` | Keil-/Block-Parts | radiale Strahlen-/Stachel-Explosion |
 | `debris` | kleine Parts, kinematisch | Trümmer mit ballistischer Bahn (ohne Physik, deterministisch) |
 | `lightning` | Beams oder Neon-Parts zwischen Zickzack-Punkten | Blitze, elektrische Bögen |
+| `cameraShake` | keine Instanzen; `Camera.CFrame` über `BindToRenderStep` (nur Client) | Kamera-Shake mit Distanzabfall |
+| `screenFlash` | `ColorCorrectionEffect` unter `CurrentCamera` (nur Client) | Impact Frames, Bildschirmblitz |
 
 Prozedurale Typen sind **reine Funktionen der lokalen Zeit + Seed** (z. B. Trümmerposition = p₀ + v·t + ½·g·t²,
 Blitzform = f(seed, floor(t·flickerRate))). Dadurch funktionieren Scrubbing und Vorschau exakt, und es gibt keine

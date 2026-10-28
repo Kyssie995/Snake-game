@@ -33,7 +33,10 @@
 	* double-click empty space (Activated clickCount 2): add a keypoint there (at most 20).
 	* right-click a keypoint: remove it (never the first/last one, never below two keypoints).
 	* click empty space: deselect.
-	Every gesture reports onChange(value, false) for intermediate states and onChange(value, true) once at the end.
+	Every gesture reports onChange(value, false) for intermediate states and onChange(value, true) once at the end;
+	edits that change nothing report nothing (no empty undo steps). A structural edit (add, remove, preset,
+	"Glätten"), setEnabled(false) and a setValue that changes the keypoint count (e.g. Studio undo) end a running
+	gesture first, with onChange(value, true); the rest of that gesture is ignored. Non-finite numbers are ignored.
 
 	Toolbar: presets (Konstant, Linear ein/aus, Ein- und ausblenden, Puls, Ease-Out gebacken) and "Glätten", which
 	runs a monotone cubic (PCHIP, no overshoot, so limits hold) through the keypoints (values and envelopes) and
@@ -132,7 +135,9 @@ type SequenceEditorData = {
 	_enabled: boolean,
 	_destroyed: boolean,
 	_drag: DragState?,
-	_dragChanged: boolean,
+	_pending: boolean, -- a non-final report has not been closed with final = true yet
+	_ignoreField: string?, -- a field scrub that outlived the gesture it belonged to (ignored until its final)
+	_scrubbing: string?, -- field whose running scrub has reported (so its final report will follow)
 	_bandColumns: { Frame },
 }
 
@@ -183,6 +188,10 @@ local function roundTo(x: number, decimals: number): number
 	return if r == 0 then 0 else r
 end
 
+local function finite(x: any): boolean
+	return type(x) == "number" and x == x and x ~= math.huge and x ~= -math.huge
+end
+
 -- Smallest "nice" number (1, 2, 2.5, 5 × 10^k) >= x; mirrored for negative x.
 local function niceCeil(x: number): number
 	if x == 0 or x ~= x then
@@ -214,9 +223,9 @@ end
 local function fitUpper(required: number, other: number, current: number, base: number, limit: number): number
 	local span = current - other
 	local bound = current
-	if required >= other + span * 0.98 then
-		bound = niceCeil(other + (required - other) * 1.25)
-	elseif required < other + span * 0.4 and current > base then
+	local touchesTop = required >= other + span * 0.98
+	local mostlyUnused = required < other + span * 0.4 and current > base
+	if touchesTop or mostlyUnused then
 		bound = niceCeil(other + (required - other) * 1.25)
 	end
 	return clamp(math.max(bound, base), base, limit)
@@ -617,7 +626,9 @@ function SequenceEditor.new(props: Props): SequenceEditor
 		_enabled = props.enabled ~= false,
 		_destroyed = false,
 		_drag = nil :: DragState?,
-		_dragChanged = false,
+		_pending = false,
+		_ignoreField = nil :: string?,
+		_scrubbing = nil :: string?,
 		_bandColumns = {},
 	}, SequenceEditor)
 
@@ -658,6 +669,22 @@ function SequenceEditor.new(props: Props): SequenceEditor
 		fieldProps.layoutOrder = order
 		fieldProps.size = fieldSize
 		fieldProps.host = host
+		local route = fieldProps.onChange
+		fieldProps.onChange = function(v: number, final: boolean)
+			if self._ignoreField == key then
+				-- this scrub's gesture was ended early (structural edit, setEnabled, setValue): ignore it to its end
+				if final then
+					self._ignoreField = nil
+				end
+				return
+			end
+			if not final then
+				self._scrubbing = key
+			elseif self._scrubbing == key then
+				self._scrubbing = nil
+			end
+			route(v, final)
+		end
 		local input = NumberInput.new(fieldProps :: any)
 		input.instance.Parent = fieldRow
 		maid:give(input)
@@ -797,6 +824,7 @@ function SequenceEditor._commitKeys(self: SequenceEditor)
 end
 
 function SequenceEditor._emit(self: SequenceEditor, final: boolean)
+	self._pending = not final
 	self:_commitKeys()
 	if final and self._autoRange then
 		self:_fitRange()
@@ -804,7 +832,37 @@ function SequenceEditor._emit(self: SequenceEditor, final: boolean)
 	self:_render()
 	local onChange = self._props.onChange
 	if onChange then
-		onChange(self._value, final)
+		onChange(self:getValue(), final) -- a copy: the host may keep or mutate it
+	end
+end
+
+-- Closes earlier non-final reports with onChange(value, true) (nothing when there are none).
+function SequenceEditor._finish(self: SequenceEditor)
+	if self._pending then
+		self:_emit(true)
+	end
+end
+
+-- Ends a running gesture (plot drag or field scrub) with one final report. `abort`: the gesture is cut short, so
+-- the rest of a running field scrub is ignored.
+function SequenceEditor._endGesture(self: SequenceEditor, abort: boolean?)
+	self._drag = nil
+	-- only a scrub that has reported sends a final at its end (NumberInput), so only then is there a rest to ignore
+	local scrubbing = self._scrubbing
+	if abort and scrubbing and self.fields[scrubbing]:isDragging() then
+		self._ignoreField = scrubbing
+		self._scrubbing = nil
+	end
+	self:_finish()
+end
+
+-- After a preset or "Glätten" replaced the keypoints: report and clear the selection.
+function SequenceEditor._emitReplaced(self: SequenceEditor)
+	local hadSelection = self._selected ~= nil
+	self._selected = nil
+	self:_emit(true)
+	if hadSelection and self._props.onSelect then
+		self._props.onSelect(nil)
 	end
 end
 
@@ -901,7 +959,6 @@ end
 
 function SequenceEditor._press(self: SequenceEditor, pos: Vector2, mods: Input.Mods)
 	self._drag = nil
-	self._dragChanged = false
 	if not self._enabled then
 		return
 	end
@@ -931,18 +988,13 @@ function SequenceEditor._dragMove(self: SequenceEditor, delta: Vector2)
 		changed = self:_setEnvelope(drag.index, drag.e0 - drag.dir * delta.Y / size.Y * span)
 	end
 	if changed then
-		self._dragChanged = true
 		self:_emit(false)
 	end
 end
 
 function SequenceEditor._dragEnd(self: SequenceEditor)
-	local drag = self._drag
 	self._drag = nil
-	if drag and self._dragChanged then
-		self._dragChanged = false
-		self:_emit(true)
-	end
+	self:_finish()
 end
 
 -- constraints -----------------------------------------------------------------------------------------------------
@@ -1000,7 +1052,9 @@ end
 -- public API ------------------------------------------------------------------------------------------------------
 
 -- Sets the value without firing callbacks. Accepts the JSON form or a NumberSequence; invalid values are
--- ignored (returns false). Re-setting the current value keeps a gesture in progress intact.
+-- ignored (returns false). Re-setting the current value keeps a gesture in progress intact. A value with another
+-- keypoint count (e.g. Studio undo during a drag) ends a running gesture with onChange(value, true) — the only case
+-- in which setValue reports.
 function SequenceEditor.setValue(self: SequenceEditor, value: any): boolean
 	local okCanonical, canonical = pcall(function(): any
 		if typeof(value) == "NumberSequence" then
@@ -1014,7 +1068,11 @@ function SequenceEditor.setValue(self: SequenceEditor, value: any): boolean
 	if deepEqual(canonical, self._value) then
 		return true
 	end
+	local count = #self._keys
 	self:_load(canonical)
+	if #self._keys ~= count and (self._drag ~= nil or self._pending) then
+		self:_endGesture(true)
+	end
 	if self._autoRange then
 		self:_fitRange()
 	end
@@ -1065,10 +1123,17 @@ end
 	or nil when 20 keypoints exist already or t is closer than MIN_GAP to an existing keypoint.
 ]]
 function SequenceEditor.addKeypoint(self: SequenceEditor, t: number, v: number?, e: number?): number?
-	local keys = self._keys
-	if not self._enabled or #keys >= MAX_KEYPOINTS or t ~= t then
+	if
+		not self._enabled
+		or #self._keys >= MAX_KEYPOINTS
+		or not finite(t)
+		or (v ~= nil and not finite(v))
+		or (e ~= nil and not finite(e))
+	then
 		return nil
 	end
+	self:_endGesture(true)
+	local keys = self._keys
 	local time = roundTo(clamp(t, MIN_GAP, 1 - MIN_GAP), TIME_DECIMALS)
 	local index = #keys
 	for i = 2, #keys do
@@ -1111,6 +1176,8 @@ function SequenceEditor.removeKeypoint(self: SequenceEditor, index: number): boo
 	if not self._enabled or index <= 1 or index >= #keys or #keys <= 2 then
 		return false
 	end
+	self:_endGesture(true) -- e.g. a right-click during a drag: the drag ends first
+	keys = self._keys
 	table.remove(keys, index)
 	local sel = self._selected
 	local selectionChanged = false
@@ -1127,44 +1194,45 @@ function SequenceEditor.removeKeypoint(self: SequenceEditor, index: number): boo
 	return true
 end
 
--- Field edits (like typing/scrubbing the numeric fields). `final` defaults to true; onChange fires when the
--- keypoint changed or when final is true (closing a scrub gesture).
+-- Reports a field edit: changes as onChange(value, final); a final without a change only closes earlier
+-- non-final reports (a scrub whose last step equals the value).
+function SequenceEditor._fieldEdit(self: SequenceEditor, changed: boolean, final: boolean?)
+	local isFinal = final ~= false
+	if changed then
+		self:_emit(isFinal)
+	elseif isFinal then
+		self:_finish()
+	end
+end
+
+-- Field edits (like typing/scrubbing the numeric fields). `final` defaults to true. Edits that change nothing
+-- report nothing, except a final that closes earlier non-final reports. Ignored while disabled and for
+-- non-finite numbers.
 function SequenceEditor.setKeypointTime(self: SequenceEditor, index: number, t: number, final: boolean?)
 	local kp = self._keys[index]
-	if kp == nil or not self._enabled then
+	if kp == nil or not self._enabled or not finite(t) then
 		return
 	end
-	local isFinal = final ~= false
-	local changed = self:_setPoint(index, t, kp[2], false)
-	if changed or isFinal then
-		self:_emit(isFinal)
-	end
+	self:_fieldEdit(self:_setPoint(index, t, kp[2], false), final)
 end
 
 function SequenceEditor.setKeypointValue(self: SequenceEditor, index: number, v: number, final: boolean?)
 	local kp = self._keys[index]
-	if kp == nil or not self._enabled then
+	if kp == nil or not self._enabled or not finite(v) then
 		return
 	end
-	local isFinal = final ~= false
-	local changed = self:_setPoint(index, kp[1], v, false)
-	if changed or isFinal then
-		self:_emit(isFinal)
-	end
+	self:_fieldEdit(self:_setPoint(index, kp[1], v, false), final)
 end
 
 function SequenceEditor.setKeypointEnvelope(self: SequenceEditor, index: number, e: number, final: boolean?)
-	if self._keys[index] == nil or not self._enabled then
+	if self._keys[index] == nil or not self._enabled or not finite(e) then
 		return
 	end
-	local isFinal = final ~= false
-	local changed = self:_setEnvelope(index, e)
-	if changed or isFinal then
-		self:_emit(isFinal)
-	end
+	self:_fieldEdit(self:_setEnvelope(index, e), final)
 end
 
--- Applies a preset (SequenceEditor.PRESETS) between presetLow and presetHigh. Fires onChange(value, true).
+-- Applies a preset (SequenceEditor.PRESETS) between presetLow and presetHigh. Fires onChange(value, true) when
+-- the value changed. Returns false for unknown ids and while disabled.
 function SequenceEditor.applyPreset(self: SequenceEditor, id: string): boolean
 	if not self._enabled then
 		return false
@@ -1172,14 +1240,16 @@ function SequenceEditor.applyPreset(self: SequenceEditor, id: string): boolean
 	local low = self._props.presetLow or self._baseLo
 	local high = self._props.presetHigh or self._baseHi
 	local ok, raw = pcall(SequenceEditor.preset, id, low, high)
-	if not ok or not self:_load(raw) then
+	if not ok then
 		return false
 	end
-	local hadSelection = self._selected ~= nil
-	self._selected = nil
-	self:_emit(true)
-	if hadSelection and self._props.onSelect then
-		self._props.onSelect(nil)
+	self:_endGesture(true)
+	local before = self._value
+	if not self:_load(raw) then
+		return false
+	end
+	if not deepEqual(before, self._value) then
+		self:_emitReplaced()
 	end
 	return true
 end
@@ -1190,14 +1260,13 @@ function SequenceEditor.smooth(self: SequenceEditor): number?
 	if not self._enabled then
 		return nil
 	end
+	self:_endGesture(true)
+	local before = self._value
 	local tolerance = math.max(1e-4, (self._hi - self._lo) * SMOOTH_TOLERANCE)
 	local value, maxError = SequenceEditor.smoothKeypoints(self._keys, self._spec, tolerance)
 	self:_load(value)
-	local hadSelection = self._selected ~= nil
-	self._selected = nil
-	self:_emit(true)
-	if hadSelection and self._props.onSelect then
-		self._props.onSelect(nil)
+	if not deepEqual(before, self._value) then
+		self:_emitReplaced()
 	end
 	return maxError
 end
@@ -1237,11 +1306,13 @@ function SequenceEditor._applyEnabled(self: SequenceEditor)
 	self.smoothButton:setEnabled(enabled)
 end
 
+-- Disabling ends a running gesture (plot drag or field scrub) with onChange(value, true); the rest of that
+-- gesture is ignored.
 function SequenceEditor.setEnabled(self: SequenceEditor, enabled: boolean)
-	self._enabled = enabled
-	if not enabled then
-		self:_dragEnd()
+	if not enabled and self._enabled then
+		self:_endGesture(true)
 	end
+	self._enabled = enabled
 	self:_applyEnabled()
 	self:_render()
 end
