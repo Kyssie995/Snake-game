@@ -409,6 +409,9 @@ return function(T: any, use: (string) -> any, ctx: any)
 				{ "charging", "charge" },
 				{ "aufladen", "charge" },
 				{ "orb", "sphere" },
+				{ "core", "sphere" },
+				{ "lightning", "arcs" },
+				{ "Lichtbogen", "arcs" },
 				{ "Kugel", "sphere" },
 				{ "arcs", "arcs" },
 				{ "Bögen", "arcs" },
@@ -636,6 +639,23 @@ return function(T: any, use: (string) -> any, ctx: any)
 				-- Low really is lighter (optional layers drop, counts scale).
 				expect(low.totals.instances).toBeLessThanOrEqual(high.totals.instances)
 				expect(low.peaks.liveParticles.value).toBeLessThanOrEqual(high.peaks.liveParticles.value)
+			end
+		end)
+
+		T.it("follows the palette convention: bright core, saturated mid, dark edge", function()
+			local function saturation(hex: string): number
+				local r, g, b = rgb(hex)
+				local hi, lo = math.max(r, g, b), math.min(r, g, b)
+				return if hi == 0 then 0 else (hi - lo) / hi
+			end
+			for _, prompt in PROMPTS do
+				local palette = cached(prompt).palette
+				for _, key in { "core", "mid", "edge", "smoke" } do
+					expect(string.match(palette[key], "^#%x%x%x%x%x%x$") ~= nil).toBe(true)
+				end
+				expect(luminance(palette.core)).toBeGreaterThan(luminance(palette.mid))
+				expect(luminance(palette.mid)).toBeGreaterThan(luminance(palette.edge))
+				expect(saturation(palette.mid)).toBeGreaterThan(saturation(palette.core))
 			end
 		end)
 
