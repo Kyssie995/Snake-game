@@ -495,11 +495,10 @@ return function(T: any, use: (string) -> any, ctx: any)
 			bindCameraScript(CFrame.new(0, 5, 18))
 			AstraVFX.Register(definition())
 			local first = AstraVFX.Play("Camera Hit", { Position = Vector3.new(0, 0, 0) })
-			stepTo(first, 0.2)
+			stepTo(first, 0.1)
 			local second = AstraVFX.Play("Camera Hit", { Position = Vector3.new(4, 0, 0) })
-			for _ = 1, 3 do
-				frame()
-			end
+			stepTo(second, 0.25)
+			expect(first:GetTime() < 0.4).toBe(true) -- both flashes are showing
 			expect(astraBindings()).toBe(2)
 			expect(#effectsUnderCamera()).toBe(2) -- one post effect per flash; the engine combines them
 			stepTo(first, SHAKE_END)
